@@ -1,0 +1,229 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  ADMIN
+  TEAM_LEAD
+  TEAM_MEMBER
+}
+
+enum ProjectStatus {
+  PLANNED
+  IN_PROGRESS
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  IN_REVIEW
+  BLOCKED
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum ActivityEntityType {
+  ORGANIZATION
+  USER
+  TEAM
+  TEAM_MEMBERSHIP
+  PROJECT
+  TASK
+  NOTIFICATION
+  REPORT
+  GITHUB_REPOSITORY
+  AI_INSIGHT
+}
+
+model Organization {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users        User[]
+  teams        Team[]
+  projects     Project[]
+  activityLogs ActivityLog[]
+
+  @@index([isActive])
+  @@index([createdAt])
+}
+
+model User {
+  id             String   @id @default(uuid()) @db.Uuid
+  fullName       String
+  email          String   @unique
+  passwordHash   String
+  role           UserRole @default(TEAM_MEMBER)
+  githubUsername String?  @unique
+  avatar         String?
+  phone          String?
+  location       String?
+  isActive       Boolean  @default(true)
+  organizationId String   @db.Uuid
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ledTeams        Team[]           @relation("TeamLead")
+  teamMemberships TeamMembership[]
+  createdProjects Project[]        @relation("ProjectCreatedBy")
+  assignedTasks   Task[]           @relation("TaskAssignedTo")
+  delegatedTasks  Task[]           @relation("TaskAssignedBy")
+  notifications   Notification[]
+  activityLogs    ActivityLog[]    @relation("ActivityActor")
+
+  @@index([organizationId])
+  @@index([role])
+  @@index([isActive])
+  @@index([createdAt])
+}
+
+model Team {
+  id             String   @id @default(uuid()) @db.Uuid
+  name           String
+  description    String?
+  leadId         String   @db.Uuid
+  organizationId String   @db.Uuid
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  lead             User             @relation("TeamLead", fields: [leadId], references: [id], onDelete: Restrict)
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  memberships      TeamMembership[]
+  assignedProjects Project[]
+
+  @@unique([organizationId, name])
+  @@index([leadId])
+  @@index([organizationId])
+  @@index([createdAt])
+}
+
+model TeamMembership {
+  id       String   @id @default(uuid()) @db.Uuid
+  userId   String   @db.Uuid
+  teamId   String   @db.Uuid
+  joinedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, teamId])
+  @@index([userId])
+  @@index([teamId])
+  @@index([joinedAt])
+}
+
+model Project {
+  id             String        @id @default(uuid()) @db.Uuid
+  title          String
+  description    String?
+  repositoryUrl  String?
+  deadline       DateTime?
+  status         ProjectStatus @default(PLANNED)
+  progress       Int           @default(0)
+  healthScore    Int           @default(0)
+  organizationId String        @db.Uuid
+  assignedTeamId String?       @db.Uuid
+  createdById    String        @db.Uuid
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignedTeam Team?        @relation(fields: [assignedTeamId], references: [id], onDelete: SetNull)
+  createdBy    User         @relation("ProjectCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  tasks        Task[]
+
+  @@index([organizationId])
+  @@index([assignedTeamId])
+  @@index([createdById])
+  @@index([status])
+  @@index([deadline])
+  @@index([createdAt])
+}
+
+model Task {
+  id           String       @id @default(uuid()) @db.Uuid
+  title        String
+  description  String?
+  status       TaskStatus   @default(TODO)
+  priority     TaskPriority @default(MEDIUM)
+  deadline     DateTime?
+  projectId    String       @db.Uuid
+  assignedToId String       @db.Uuid
+  assignedById String       @db.Uuid
+  progress     Int          @default(0)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  project    Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignedTo User    @relation("TaskAssignedTo", fields: [assignedToId], references: [id], onDelete: Restrict)
+  assignedBy User    @relation("TaskAssignedBy", fields: [assignedById], references: [id], onDelete: Restrict)
+
+  @@index([projectId])
+  @@index([assignedToId])
+  @@index([assignedById])
+  @@index([status])
+  @@index([priority])
+  @@index([deadline])
+  @@index([createdAt])
+}
+
+model Notification {
+  id          String   @id @default(uuid()) @db.Uuid
+  title       String
+  message     String
+  isRead      Boolean  @default(false)
+  recipientId String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  recipient User @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@index([recipientId])
+  @@index([isRead])
+  @@index([createdAt])
+}
+
+model ActivityLog {
+  id             String             @id @default(uuid()) @db.Uuid
+  actorId        String?            @db.Uuid
+  organizationId String?            @db.Uuid
+  action         String
+  entityType     ActivityEntityType
+  entityId       String             @db.Uuid
+  metadata       Json?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  actor        User?         @relation("ActivityActor", fields: [actorId], references: [id], onDelete: SetNull)
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([actorId])
+  @@index([organizationId])
+  @@index([action])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
