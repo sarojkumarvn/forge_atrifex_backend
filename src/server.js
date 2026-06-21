@@ -7,6 +7,7 @@ import authRoutes from "./routes/auth.routes.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
 import projectRoutes from "./routes/project.routes.js";
+import reportRoutes from "./routes/report.routes.js";
 import taskRoutes from "./routes/task.routes.js";
 import teamRoutes from "./routes/team.routes.js";
 
@@ -45,6 +46,7 @@ app.use("/api/tasks", taskRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/activity", activityRoutes);
 app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/reports", reportRoutes);
 
 app.use((req, res) => {
   res.status(404).json({
