@@ -3,6 +3,7 @@ import dotenv from "dotenv";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import authRoutes from "./routes/auth.routes.js";
+import teamRoutes from "./routes/team.routes.js";
 
 dotenv.config();
 
@@ -33,6 +34,7 @@ app.get("/api/health", (req, res) => {
 });
 
 app.use("/api/auth", authRoutes);
+app.use("/api/teams", teamRoutes);
 
 app.use((req, res) => {
   res.status(404).json({
