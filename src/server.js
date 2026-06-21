@@ -2,7 +2,12 @@ import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import activityRoutes from "./routes/activity.routes.js";
 import authRoutes from "./routes/auth.routes.js";
+import dashboardRoutes from "./routes/dashboard.routes.js";
+import notificationRoutes from "./routes/notification.routes.js";
+import projectRoutes from "./routes/project.routes.js";
+import taskRoutes from "./routes/task.routes.js";
 import teamRoutes from "./routes/team.routes.js";
 
 dotenv.config();
@@ -35,6 +40,11 @@ app.get("/api/health", (req, res) => {
 
 app.use("/api/auth", authRoutes);
 app.use("/api/teams", teamRoutes);
+app.use("/api/projects", projectRoutes);
+app.use("/api/tasks", taskRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/activity", activityRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 
 app.use((req, res) => {
   res.status(404).json({
