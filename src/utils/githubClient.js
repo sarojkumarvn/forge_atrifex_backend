@@ -1,0 +1,190 @@
+import crypto from "crypto";
+import ApiError from "./apiError.js";
+
+const defaultGithubApiUrl = "https://api.github.com";
+const githubOAuthAuthorizeUrl = "https://github.com/login/oauth/authorize";
+const githubOAuthTokenUrl = "https://github.com/login/oauth/access_token";
+
+const getGithubApiUrl = () => (process.env.GITHUB_API_URL || defaultGithubApiUrl).replace(/\/$/, "");
+
+const assertOAuthConfig = () => {
+  if (!process.env.GITHUB_CLIENT_ID || !process.env.GITHUB_CLIENT_SECRET || !process.env.GITHUB_CALLBACK_URL) {
+    throw new ApiError(500, "GitHub OAuth is not configured");
+  }
+};
+
+const getTokenKey = () => {
+  if (!process.env.GITHUB_TOKEN_ENCRYPTION_KEY) {
+    throw new ApiError(500, "GitHub token encryption key is not configured");
+  }
+
+  return crypto.createHash("sha256").update(process.env.GITHUB_TOKEN_ENCRYPTION_KEY).digest();
+};
+
+export const encryptGithubToken = (token) => {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", getTokenKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(token, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+
+  return `${iv.toString("base64")}:${tag.toString("base64")}:${encrypted.toString("base64")}`;
+};
+
+export const decryptGithubToken = (encryptedToken) => {
+  if (!encryptedToken) {
+    throw new ApiError(401, "GitHub account is not connected");
+  }
+
+  const [ivValue, tagValue, encryptedValue] = encryptedToken.split(":");
+
+  if (!ivValue || !tagValue || !encryptedValue) {
+    throw new ApiError(500, "Stored GitHub token is invalid");
+  }
+
+  const decipher = crypto.createDecipheriv("aes-256-gcm", getTokenKey(), Buffer.from(ivValue, "base64"));
+  decipher.setAuthTag(Buffer.from(tagValue, "base64"));
+
+  return Buffer.concat([
+    decipher.update(Buffer.from(encryptedValue, "base64")),
+    decipher.final(),
+  ]).toString("utf8");
+};
+
+export const buildGithubOAuthUrl = (state) => {
+  assertOAuthConfig();
+
+  const params = new URLSearchParams({
+    client_id: process.env.GITHUB_CLIENT_ID,
+    redirect_uri: process.env.GITHUB_CALLBACK_URL,
+    // Private repository analytics require repo scope; reduce this if public-only analytics are enough.
+    scope: "repo read:user user:email",
+    state,
+    allow_signup: "true",
+  });
+
+  // OAuth flow begins with a signed state value so the callback can safely identify the Forge user.
+  return `${githubOAuthAuthorizeUrl}?${params.toString()}`;
+};
+
+export const exchangeCodeForToken = async (code) => {
+  assertOAuthConfig();
+
+  const response = await fetch(githubOAuthTokenUrl, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      client_id: process.env.GITHUB_CLIENT_ID,
+      client_secret: process.env.GITHUB_CLIENT_SECRET,
+      code,
+      redirect_uri: process.env.GITHUB_CALLBACK_URL,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new ApiError(502, "GitHub OAuth token exchange failed");
+  }
+
+  const payload = await response.json();
+
+  if (!payload.access_token) {
+    throw new ApiError(400, payload.error_description || "GitHub OAuth did not return an access token");
+  }
+
+  return {
+    accessToken: payload.access_token,
+    scope: payload.scope || "",
+  };
+};
+
+const parseNextLink = (linkHeader) => {
+  if (!linkHeader) {
+    return null;
+  }
+
+  const nextLink = linkHeader.split(",").find((part) => part.includes('rel="next"'));
+
+  if (!nextLink) {
+    return null;
+  }
+
+  const match = nextLink.match(/<([^>]+)>/);
+  return match?.[1] || null;
+};
+
+export const githubRequest = async ({ token, path, method = "GET", body = null, query = null, absoluteUrl = null }) => {
+  const baseUrl = absoluteUrl || `${getGithubApiUrl()}${path}`;
+  const url = new URL(baseUrl);
+
+  if (query) {
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== null) {
+        url.searchParams.set(key, String(value));
+      }
+    }
+  }
+
+  // GitHub API requests always use the caller's OAuth token to enforce repository ownership.
+  const response = await fetch(url, {
+    method,
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${token}`,
+      "X-GitHub-Api-Version": "2022-11-28",
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+
+  const remainingHeader = response.headers.get("x-ratelimit-remaining");
+
+  if ((response.status === 403 && remainingHeader === "0") || response.status === 429) {
+    // Handle GitHub API rate limiting gracefully instead of surfacing provider internals.
+    throw new ApiError(429, "GitHub API rate limit exceeded. Please try again later.");
+  }
+
+  if (response.status === 404) {
+    throw new ApiError(404, "GitHub resource not found or not accessible");
+  }
+
+  if (!response.ok) {
+    throw new ApiError(502, "GitHub API request failed");
+  }
+
+  const text = await response.text();
+
+  return {
+    data: text ? JSON.parse(text) : null,
+    nextUrl: parseNextLink(response.headers.get("link")),
+  };
+};
+
+export const githubPaginatedRequest = async ({ token, path, query = {}, maxPages = 5 }) => {
+  const results = [];
+  let page = 1;
+  let nextUrl = null;
+
+  do {
+    const response = await githubRequest({
+      token,
+      path,
+      query: {
+        per_page: 100,
+        ...query,
+        page,
+      },
+      absoluteUrl: nextUrl,
+    });
+
+    if (Array.isArray(response.data)) {
+      results.push(...response.data);
+    }
+
+    nextUrl = response.nextUrl;
+    page += 1;
+  } while (nextUrl && page <= maxPages);
+
+  return results;
+};

@@ -2,29 +2,9 @@ import bcrypt from "bcrypt";
 import prisma from "../config/prisma.js";
 import generateToken from "../utils/generateToken.js";
 import getDashboardPath from "../utils/dashboardPath.js";
+import { formatSafeUser, safeUserSelect } from "../utils/safeUser.js";
 
 const validRoles = new Set(["ADMIN", "TEAM_LEAD", "TEAM_MEMBER"]);
-
-const userSelect = {
-  id: true,
-  fullName: true,
-  email: true,
-  role: true,
-  githubUsername: true,
-  avatar: true,
-  phone: true,
-  location: true,
-  isActive: true,
-  organizationId: true,
-  createdAt: true,
-  updatedAt: true,
-  organization: {
-    select: {
-      id: true,
-      name: true,
-    },
-  },
-};
 
 export const register = async (req, res, next) => {
   try {
@@ -66,56 +46,63 @@ export const register = async (req, res, next) => {
       });
     }
 
-    let organization = null;
     const normalizedOrganizationName = organizationName?.trim();
 
-    if (normalizedOrganizationName) {
-      organization = await prisma.organization.findFirst({
-        where: { name: normalizedOrganizationName },
-      });
-
-      if (!organization) {
-        organization = await prisma.organization.create({
-          data: { name: normalizedOrganizationName },
-        });
-      }
-    } else {
-      organization = await prisma.organization.findFirst({
-        orderBy: { createdAt: "asc" },
-      });
-    }
-
-    if (!organization) {
+    if (!normalizedOrganizationName) {
+      // Never auto-join the first organization because it breaks tenant isolation.
       return res.status(400).json({
         success: false,
-        message: "organizationName is required when no organization exists",
+        message: "organizationName is required",
       });
     }
 
-    const passwordHash = await bcrypt.hash(password, 12);
-
-    const user = await prisma.user.create({
-      data: {
-        fullName: fullName.trim(),
-        email: normalizedEmail,
-        passwordHash,
-        role,
-        organizationId: organization.id,
-        githubUsername: githubUsername?.trim() || null,
-        phone: phone?.trim() || null,
-        location: location?.trim() || null,
-      },
-      select: userSelect,
+    const existingOrganization = await prisma.organization.findFirst({
+      where: { name: normalizedOrganizationName },
     });
 
-    const token = generateToken(user);
+    if (existingOrganization && role === "ADMIN") {
+      // Public registration cannot create admins inside existing organizations.
+      return res.status(403).json({
+        success: false,
+        message: "Public registration cannot create admins inside existing organizations",
+      });
+    }
+
+    const assignedRole = existingOrganization ? role || "TEAM_MEMBER" : "ADMIN";
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    const user = await prisma.$transaction(async (tx) => {
+      const organization =
+        existingOrganization ||
+        (await tx.organization.create({
+          data: { name: normalizedOrganizationName },
+        }));
+
+      return tx.user.create({
+        data: {
+          fullName: fullName.trim(),
+          email: normalizedEmail,
+          passwordHash,
+          role: assignedRole,
+          organizationId: organization.id,
+          githubUsername: githubUsername?.trim() || null,
+          phone: phone?.trim() || null,
+          location: location?.trim() || null,
+        },
+        // Use explicit selects so secret-bearing fields can never leak in auth responses.
+        select: safeUserSelect,
+      });
+    });
+
+    const safeUser = formatSafeUser(user);
+    const token = generateToken(safeUser);
 
     return res.status(201).json({
       success: true,
       message: "Registration successful",
       token,
-      user,
-      dashboardPath: getDashboardPath(user.role),
+      user: safeUser,
+      dashboardPath: getDashboardPath(safeUser.role),
     });
   } catch (error) {
     if (error.code === "P2002") {
@@ -142,7 +129,9 @@ export const login = async (req, res, next) => {
 
     const user = await prisma.user.findUnique({
       where: { email: email.toLowerCase().trim() },
-      include: {
+      select: {
+        ...safeUserSelect,
+        passwordHash: true,
         organization: {
           select: {
             id: true,
@@ -175,7 +164,7 @@ export const login = async (req, res, next) => {
       });
     }
 
-    const { passwordHash, ...safeUser } = user;
+    const safeUser = formatSafeUser(user);
     const token = generateToken(safeUser);
 
     return res.json({
@@ -191,10 +180,16 @@ export const login = async (req, res, next) => {
 };
 
 export const me = async (req, res) => {
+  const user = await prisma.user.findUnique({
+    where: { id: req.user.id },
+    // Use explicit selects so secret-bearing fields can never leak in auth responses.
+    select: safeUserSelect,
+  });
+
   return res.json({
     success: true,
-    user: req.user,
-    dashboardPath: getDashboardPath(req.user.role),
+    user: formatSafeUser(user),
+    dashboardPath: getDashboardPath(user.role),
   });
 };
 

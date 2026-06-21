@@ -78,6 +78,8 @@ model User {
   passwordHash   String
   role           UserRole @default(TEAM_MEMBER)
   githubUsername String?  @unique
+  githubAccessToken String?
+  githubTokenScope String?
   avatar         String?
   phone          String?
   location       String?
@@ -141,6 +143,10 @@ model Project {
   title          String
   description    String?
   repositoryUrl  String?
+  githubRepositoryId String?
+  githubRepositoryOwner String?
+  githubRepositoryName String?
+  githubDefaultBranch String?
   deadline       DateTime?
   status         ProjectStatus @default(PLANNED)
   progress       Int           @default(0)
@@ -159,6 +165,7 @@ model Project {
   @@index([organizationId])
   @@index([assignedTeamId])
   @@index([createdById])
+  @@index([githubRepositoryOwner, githubRepositoryName])
   @@index([status])
   @@index([deadline])
   @@index([createdAt])
