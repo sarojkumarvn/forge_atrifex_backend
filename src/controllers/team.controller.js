@@ -3,6 +3,7 @@ import ApiError from "../utils/apiError.js";
 import { sendSuccess } from "../utils/apiResponse.js";
 import asyncHandler from "../utils/asyncHandler.js";
 import logActivity from "../utils/activityLogger.js";
+import { createNotifications } from "../utils/notificationSender.js";
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const activeProjectStatuses = ["PLANNED", "IN_PROGRESS", "ON_HOLD"];
@@ -369,6 +370,33 @@ export const createTeam = asyncHandler(async (req, res) => {
         })),
         skipDuplicates: true,
       });
+
+      // Notify new members immediately so team membership changes appear in their inbox.
+      await createNotifications({
+        notifications: validMemberIds.map((recipientId) => ({
+          title: "You have been added to a team",
+          message: `You have been added to ${createdTeam.name}.`,
+          recipientId,
+        })),
+        client: tx,
+      });
+
+      await Promise.all(
+        validMemberIds.map((memberId) =>
+          logActivity({
+            actorId: req.user.id,
+            organizationId: req.user.organizationId,
+            action: "USER_JOINED_TEAM",
+            entityType: "TEAM",
+            entityId: createdTeam.id,
+            metadata: {
+              teamId: createdTeam.id,
+              memberId,
+            },
+            client: tx,
+          }),
+        ),
+      );
     }
 
     await logActivity({
@@ -558,6 +586,16 @@ export const addTeamMembers = asyncHandler(async (req, res) => {
       skipDuplicates: true,
     });
 
+    // Notify only newly-added members and skip existing memberships.
+    await createNotifications({
+      notifications: newMemberIds.map((recipientId) => ({
+        title: "You have been added to a team",
+        message: `You have been added to ${team.name}.`,
+        recipientId,
+      })),
+      client: tx,
+    });
+
     await logActivity({
       actorId: req.user.id,
       organizationId: req.user.organizationId,
@@ -570,6 +608,23 @@ export const addTeamMembers = asyncHandler(async (req, res) => {
       },
       client: tx,
     });
+
+    await Promise.all(
+      newMemberIds.map((memberId) =>
+        logActivity({
+          actorId: req.user.id,
+          organizationId: req.user.organizationId,
+          action: "USER_JOINED_TEAM",
+          entityType: "TEAM",
+          entityId: team.id,
+          metadata: {
+            teamId: team.id,
+            memberId,
+          },
+          client: tx,
+        }),
+      ),
+    );
   });
 
   return sendSuccess(res, 200, "Team members added successfully", await getTeamForResponse(team.id));
@@ -623,6 +678,19 @@ export const removeTeamMember = asyncHandler(async (req, res) => {
       entityId: team.id,
       metadata: {
         removedMemberId: userId,
+      },
+      client: tx,
+    });
+
+    await logActivity({
+      actorId: req.user.id,
+      organizationId: req.user.organizationId,
+      action: "USER_REMOVED_FROM_TEAM",
+      entityType: "TEAM",
+      entityId: team.id,
+      metadata: {
+        teamId: team.id,
+        memberId: userId,
       },
       client: tx,
     });
