@@ -1,6 +1,9 @@
 import ApiError from "../utils/apiError.js";
 import { buildAiPrompt } from "../utils/aiPrompts.js";
 import { validateAiResponse } from "../utils/aiResponseValidator.js";
+import logger from "../config/logger.js";
+import metrics from "../utils/metrics.js";
+import { getRequestLoggerMeta } from "../utils/requestContext.js";
 import {
   buildExecutiveSummaryContext,
   buildProjectAnalysisContext,
@@ -55,22 +58,99 @@ const aiProviders = {
 };
 
 const runAiWorkflow = async ({ type, contextBuilder, user, id }) => {
+  const start = performance.now();
+  const providerName = (process.env.AI_PROVIDER || "groq").toLowerCase();
+  const model = process.env.AI_MODEL || defaultModel;
+
+  // AI logs intentionally exclude prompts and model output to avoid leaking business context.
+  logger.info(
+    {
+      ...getRequestLoggerMeta(),
+      endpoint: type,
+      provider: providerName,
+      model,
+    },
+    "AI request started",
+  );
+
   // Build context before prompt creation so AI receives only authorized business data.
   const context = id ? await contextBuilder(user, id) : await contextBuilder(user);
 
   // Prompt construction is centralized to keep JSON contracts consistent across endpoints.
   const prompt = buildAiPrompt(type, context);
-  const providerName = (process.env.AI_PROVIDER || "groq").toLowerCase();
   const provider = aiProviders[providerName];
 
   if (!provider) {
+    const durationMs = Math.round(performance.now() - start);
+    metrics.recordProviderLatency("ai", durationMs);
+    metrics.recordProviderFailure("ai");
+    logger.error(
+      {
+        ...getRequestLoggerMeta(),
+        endpoint: type,
+        provider: providerName,
+        model,
+        durationMs,
+      },
+      "AI request failed",
+    );
     throw new ApiError(500, "AI provider is not supported");
   }
 
-  const rawOutput = await provider(prompt);
+  try {
+    const rawOutput = await provider(prompt);
+    const durationMs = Math.round(performance.now() - start);
+    metrics.recordProviderLatency("ai", durationMs);
 
-  // LLM response validation protects the frontend from malformed or partial provider output.
-  return validateAiResponse(type, rawOutput);
+    logger.info(
+      {
+        ...getRequestLoggerMeta(),
+        endpoint: type,
+        provider: providerName,
+        model,
+        durationMs,
+      },
+      "AI request completed",
+    );
+
+    if (durationMs > 5000) {
+      logger.warn(
+        {
+          ...getRequestLoggerMeta(),
+          endpoint: type,
+          provider: providerName,
+          model,
+          durationMs,
+        },
+        "Slow AI request detected",
+      );
+    }
+
+    // LLM response validation protects the frontend from malformed or partial provider output.
+    return validateAiResponse(type, rawOutput);
+  } catch (error) {
+    const durationMs = Math.round(performance.now() - start);
+    metrics.recordProviderLatency("ai", durationMs);
+    metrics.recordProviderFailure("ai");
+
+    logger.error(
+      {
+        ...getRequestLoggerMeta(),
+        endpoint: type,
+        provider: providerName,
+        model,
+        durationMs,
+        error: {
+          message: error.message,
+          statusCode: error.statusCode,
+          code: error.code,
+        },
+      },
+      "AI request failed",
+    );
+
+    throw error;
+  }
 };
 
 export const generateProjectAnalysis = (user, projectId) =>

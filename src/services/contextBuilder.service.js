@@ -1,5 +1,6 @@
 import prisma from "../config/prisma.js";
 import ApiError from "../utils/apiError.js";
+import { buildCacheKey, cacheTtl, getOrSetCache } from "./cache.service.js";
 import {
   buildProjectRiskMessages,
   calculateAverageHealth,
@@ -19,6 +20,7 @@ import { getDeliveryReport, getExecutiveSummary, getTeamReport } from "./report.
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const taskContextLimit = 30;
 const activityContextLimit = 20;
+const taskMetricLimit = 200;
 
 const userSelect = {
   id: true,
@@ -28,7 +30,16 @@ const userSelect = {
   isActive: true,
 };
 
-const taskInclude = {
+const taskSelect = {
+  id: true,
+  title: true,
+  status: true,
+  priority: true,
+  progress: true,
+  deadline: true,
+  createdAt: true,
+  updatedAt: true,
+  assignedToId: true,
   assignedTo: {
     select: userSelect,
   },
@@ -37,9 +48,20 @@ const taskInclude = {
   },
 };
 
-const projectInclude = {
+const projectSelect = {
+  id: true,
+  title: true,
+  description: true,
+  status: true,
+  progress: true,
+  deadline: true,
+  createdAt: true,
+  updatedAt: true,
   assignedTeam: {
-    include: {
+    select: {
+      id: true,
+      name: true,
+      description: true,
       lead: {
         select: userSelect,
       },
@@ -56,10 +78,19 @@ const projectInclude = {
     select: userSelect,
   },
   tasks: {
-    include: taskInclude,
+    select: taskSelect,
     orderBy: [{ status: "asc" }, { deadline: "asc" }, { updatedAt: "desc" }],
+    // Limit historical records to reduce token usage and response latency.
+    take: taskMetricLimit,
   },
 };
+
+const cacheAiContext = (user, name, id, factory) =>
+  getOrSetCache(
+    buildCacheKey("ai-context", name, user.organizationId, user.id, user.role, id),
+    cacheTtl.aiContext,
+    factory,
+  );
 
 const validateUuid = (id, fieldName) => {
   if (!uuidRegex.test(id)) {
@@ -193,7 +224,7 @@ const getAccessibleProject = async (user, projectId) => {
       id: projectId,
       ...buildProjectAccessWhere(user),
     },
-    include: projectInclude,
+    select: projectSelect,
   });
 
   if (!project) {
@@ -211,7 +242,7 @@ const buildProjectBaseContext = async (user, projectId) => {
     entityIds: [project.id, ...project.tasks.map((task) => task.id)],
   });
 
-  return {
+  const context = {
     project: {
       id: project.id,
       title: project.title,
@@ -242,15 +273,28 @@ const buildProjectBaseContext = async (user, projectId) => {
         role: membership.user.role,
       })) || [],
   };
+
+  Object.defineProperties(context, {
+    rawTasks: {
+      value: project.tasks,
+      enumerable: false,
+    },
+    rawTeamMemberships: {
+      value: project.assignedTeam?.memberships || [],
+      enumerable: false,
+    },
+  });
+
+  return context;
 };
 
 export const buildProjectAnalysisContext = async (user, projectId) => {
   // Build project context from live metrics before sending to AI.
-  return buildProjectBaseContext(user, projectId);
+  return cacheAiContext(user, "project-analysis", projectId, () => buildProjectBaseContext(user, projectId));
 };
 
 export const buildRiskAnalysisContext = async (user, projectId) => {
-  const context = await buildProjectBaseContext(user, projectId);
+  const context = await cacheAiContext(user, "risk-analysis-base", projectId, () => buildProjectBaseContext(user, projectId));
 
   return {
     project: context.project,
@@ -266,89 +310,95 @@ export const buildRiskAnalysisContext = async (user, projectId) => {
 };
 
 export const buildTeamAnalysisContext = async (user, teamId) => {
-  validateUuid(teamId, "teamId");
+  return cacheAiContext(user, "team-analysis", teamId, async () => {
+    validateUuid(teamId, "teamId");
 
-  const team = await prisma.team.findFirst({
-    where: {
-      id: teamId,
-      ...buildTeamAccessWhere(user),
-    },
-    include: {
-      lead: {
-        select: userSelect,
+    const team = await prisma.team.findFirst({
+      where: {
+        id: teamId,
+        ...buildTeamAccessWhere(user),
       },
-      memberships: {
-        include: {
-          user: {
-            select: userSelect,
+      include: {
+        lead: {
+          select: userSelect,
+        },
+        memberships: {
+          include: {
+            user: {
+              select: userSelect,
+            },
           },
         },
+        assignedProjects: {
+          select: projectSelect,
+          orderBy: {
+            updatedAt: "desc",
+          },
+          take: 25,
+        },
       },
-      assignedProjects: {
-        include: projectInclude,
-      },
-    },
-  });
+    });
 
-  if (!team) {
-    throw new ApiError(404, "Team not found");
-  }
+    if (!team) {
+      throw new ApiError(404, "Team not found");
+    }
 
-  const allTasks = team.assignedProjects.flatMap((project) => project.tasks);
-  const taskSummary = summarizeTasks(allTasks);
-  const projectMetrics = team.assignedProjects.map((project) => ({
-    projectId: project.id,
-    projectName: project.title,
-    status: project.status,
-    metrics: calculateProjectMetrics(project),
-  }));
-  const memberPerformance = team.memberships.map((membership) => {
-    const memberTasks = allTasks.filter((task) => task.assignedToId === membership.userId);
-    const memberSummary = summarizeTasks(memberTasks);
+    const allTasks = team.assignedProjects.flatMap((project) => project.tasks);
+    const taskSummary = summarizeTasks(allTasks);
+    const projectMetrics = team.assignedProjects.map((project) => ({
+      projectId: project.id,
+      projectName: project.title,
+      status: project.status,
+      metrics: calculateProjectMetrics(project),
+    }));
+    const memberPerformance = team.memberships.map((membership) => {
+      const memberTasks = allTasks.filter((task) => task.assignedToId === membership.userId);
+      const memberSummary = summarizeTasks(memberTasks);
+
+      return {
+        memberId: membership.user.id,
+        name: membership.user.fullName,
+        assignedTasks: memberSummary.totalTasks,
+        completedTasks: memberSummary.completedTasks,
+        overdueTasks: memberSummary.overdueTasks,
+        blockedTasks: memberSummary.blockedTasks,
+        completionRate: memberSummary.completionRate,
+        productivityScore: calculateMemberProductivity(memberSummary),
+      };
+    });
+    const teamReport = await getTeamReport(user, teamId, {});
 
     return {
-      memberId: membership.user.id,
-      name: membership.user.fullName,
-      assignedTasks: memberSummary.totalTasks,
-      completedTasks: memberSummary.completedTasks,
-      overdueTasks: memberSummary.overdueTasks,
-      blockedTasks: memberSummary.blockedTasks,
-      completionRate: memberSummary.completionRate,
-      productivityScore: calculateMemberProductivity(memberSummary),
+      team: {
+        id: team.id,
+        name: team.name,
+        description: team.description,
+        lead: team.lead.fullName,
+        memberCount: team.memberships.length,
+        projectCount: team.assignedProjects.length,
+      },
+      report: teamReport,
+      metrics: {
+        taskSummary,
+        productivityScore: calculateTeamProductivity(taskSummary),
+        averageProjectHealth: calculateAverageHealth(projectMetrics.map((project) => project.metrics.healthScore)),
+      },
+      memberPerformance,
+      projectMetrics,
     };
   });
-  const teamReport = await getTeamReport(user, teamId, {});
-
-  return {
-    team: {
-      id: team.id,
-      name: team.name,
-      description: team.description,
-      lead: team.lead.fullName,
-      memberCount: team.memberships.length,
-      projectCount: team.assignedProjects.length,
-    },
-    report: teamReport,
-    metrics: {
-      taskSummary,
-      productivityScore: calculateTeamProductivity(taskSummary),
-      averageProjectHealth: calculateAverageHealth(projectMetrics.map((project) => project.metrics.healthScore)),
-    },
-    memberPerformance,
-    projectMetrics,
-  };
 };
 
 export const buildTaskSuggestionContext = async (user, projectId) => {
+  return cacheAiContext(user, "task-suggestions", projectId, async () => {
   const context = await buildProjectBaseContext(user, projectId);
 
   if (!context.project.assignedTeam) {
     throw new ApiError(400, "Project must be assigned to a team before AI task suggestions can be generated");
   }
 
-  const project = await getAccessibleProject(user, projectId);
-  const openTasks = project.tasks.filter((task) => openTaskStatuses.includes(task.status));
-  const teamMemberIds = project.assignedTeam.memberships.map((membership) => membership.userId);
+  const openTasks = context.rawTasks.filter((task) => openTaskStatuses.includes(task.status));
+  const teamMemberIds = context.rawTeamMemberships.map((membership) => membership.userId);
   const teamTasks = await prisma.task.findMany({
     where: {
       assignedToId: {
@@ -358,10 +408,12 @@ export const buildTaskSuggestionContext = async (user, projectId) => {
         organizationId: user.organizationId,
       },
     },
-    include: taskInclude,
+    select: taskSelect,
+    orderBy: [{ status: "asc" }, { deadline: "asc" }, { updatedAt: "desc" }],
+    take: taskMetricLimit,
   });
 
-  const memberWorkload = project.assignedTeam.memberships.map((membership) => {
+  const memberWorkload = context.rawTeamMemberships.map((membership) => {
     const memberTasks = teamTasks.filter((task) => task.assignedToId === membership.userId);
     const memberSummary = summarizeTasks(memberTasks);
 
@@ -383,9 +435,11 @@ export const buildTaskSuggestionContext = async (user, projectId) => {
     openTasks: openTasks.slice(0, taskContextLimit).map(compactTask),
     memberWorkload,
   };
+  });
 };
 
 export const buildExecutiveSummaryContext = async (user) => {
+  return cacheAiContext(user, "executive-summary", null, async () => {
   if (user.role !== "ADMIN") {
     throw new ApiError(403, "Unauthorized");
   }
@@ -429,9 +483,16 @@ export const buildExecutiveSummaryContext = async (user) => {
       where: {
         organizationId: user.organizationId,
       },
-      include: {
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        progress: true,
+        deadline: true,
         tasks: {
-          include: taskInclude,
+          select: taskSelect,
+          orderBy: [{ status: "asc" }, { deadline: "asc" }, { updatedAt: "desc" }],
+          take: taskContextLimit,
         },
         assignedTeam: {
           select: {
@@ -472,4 +533,5 @@ export const buildExecutiveSummaryContext = async (user) => {
     })),
     projectSummaries,
   };
+  });
 };

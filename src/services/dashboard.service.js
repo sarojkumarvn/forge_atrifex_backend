@@ -1,4 +1,5 @@
 import prisma from "../config/prisma.js";
+import { buildCacheKey, cacheTtl, getOrSetCache } from "./cache.service.js";
 import {
   calculateAverageHealth,
   calculateProductivityScore,
@@ -32,6 +33,30 @@ const taskSelect = {
     select: userSelect,
   },
 };
+
+const projectHealthSelect = {
+  id: true,
+  title: true,
+  status: true,
+  progress: true,
+  deadline: true,
+  assignedTeam: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
+  tasks: {
+    select: taskSelect,
+  },
+};
+
+const cacheDashboard = (user, name, factory, scope = {}) =>
+  getOrSetCache(
+    buildCacheKey("dashboard", name, user.organizationId, user.id, user.role, scope),
+    cacheTtl.dashboard,
+    factory,
+  );
 
 const isTaskOverdue = (task) => {
   return task.deadline && task.deadline < now() && !["COMPLETED", "CANCELLED"].includes(task.status);
@@ -129,7 +154,7 @@ const getCompletionSpeedDays = (tasks) => {
   return Number((totalDays / completedTasks.length).toFixed(2));
 };
 
-export const getAdminSummary = async (user) => {
+const getAdminSummaryUncached = async (user) => {
   const organizationId = user.organizationId;
   const taskWhere = buildTaskWhereForOrganization(organizationId);
   const [
@@ -163,12 +188,7 @@ export const getAdminSummary = async (user) => {
     }),
     prisma.project.findMany({
       where: { organizationId },
-      include: {
-        assignedTeam: true,
-        tasks: {
-          select: taskSelect,
-        },
-      },
+      select: projectHealthSelect,
     }),
   ]);
   const organizationHealth = calculateAverageHealth(projects.map((project) => formatProjectHealth(project).healthScore));
@@ -186,28 +206,21 @@ export const getAdminSummary = async (user) => {
   };
 };
 
-export const getAdminDeliveryHealth = async (user) => {
+export const getAdminSummary = (user) => cacheDashboard(user, "admin-summary", () => getAdminSummaryUncached(user));
+
+const getAdminDeliveryHealthUncached = async (user) => {
   const organizationId = user.organizationId;
   const [projects, teams, overdueProjects, blockedProjects] = await Promise.all([
     prisma.project.findMany({
       where: { organizationId },
-      include: {
-        assignedTeam: true,
-        tasks: {
-          select: taskSelect,
-        },
-      },
+      select: projectHealthSelect,
       orderBy: { createdAt: "desc" },
     }),
     prisma.team.findMany({
       where: { organizationId },
       include: {
         assignedProjects: {
-          include: {
-            tasks: {
-              select: taskSelect,
-            },
-          },
+          select: projectHealthSelect,
         },
       },
     }),
@@ -265,7 +278,10 @@ export const getAdminDeliveryHealth = async (user) => {
   };
 };
 
-export const getAdminContributionAnalytics = async (user) => {
+export const getAdminDeliveryHealth = (user) =>
+  cacheDashboard(user, "admin-delivery-health", () => getAdminDeliveryHealthUncached(user));
+
+const getAdminContributionAnalyticsUncached = async (user) => {
   const teams = await prisma.team.findMany({
     where: {
       organizationId: user.organizationId,
@@ -279,7 +295,8 @@ export const getAdminContributionAnalytics = async (user) => {
         },
       },
       assignedProjects: {
-        include: {
+        select: {
+          id: true,
           tasks: {
             select: taskSelect,
           },
@@ -311,7 +328,10 @@ export const getAdminContributionAnalytics = async (user) => {
   });
 };
 
-export const getTeamLeadSummary = async (user) => {
+export const getAdminContributionAnalytics = (user) =>
+  cacheDashboard(user, "admin-contribution", () => getAdminContributionAnalyticsUncached(user));
+
+const getTeamLeadSummaryUncached = async (user) => {
   const teamIds = await getLeadTeamIds(user);
   const taskWhere = {
     project: {
@@ -356,12 +376,7 @@ export const getTeamLeadSummary = async (user) => {
         organizationId: user.organizationId,
         assignedTeamId: { in: teamIds },
       },
-      include: {
-        assignedTeam: true,
-        tasks: {
-          select: taskSelect,
-        },
-      },
+      select: projectHealthSelect,
     }),
   ]);
 
@@ -375,7 +390,10 @@ export const getTeamLeadSummary = async (user) => {
   };
 };
 
-export const getTeamLeadAnalytics = async (user) => {
+export const getTeamLeadSummary = (user) =>
+  cacheDashboard(user, "team-lead-summary", () => getTeamLeadSummaryUncached(user));
+
+const getTeamLeadAnalyticsUncached = async (user) => {
   const teamIds = await getLeadTeamIds(user);
   const memberships = await prisma.teamMembership.findMany({
     where: {
@@ -416,7 +434,10 @@ export const getTeamLeadAnalytics = async (user) => {
   });
 };
 
-export const getTeamLeadIssues = async (user) => {
+export const getTeamLeadAnalytics = (user) =>
+  cacheDashboard(user, "team-lead-analytics", () => getTeamLeadAnalyticsUncached(user));
+
+const getTeamLeadIssuesUncached = async (user) => {
   const teamIds = await getLeadTeamIds(user);
   const projectIds = await getTeamProjectIds(teamIds, user.organizationId);
   const [blockedTasks, overdueTasks, projects] = await Promise.all([
@@ -425,8 +446,15 @@ export const getTeamLeadIssues = async (user) => {
         projectId: { in: projectIds },
         status: "BLOCKED",
       },
-      include: {
-        project: true,
+      select: {
+        ...taskSelect,
+        project: {
+          select: {
+            id: true,
+            title: true,
+            status: true,
+          },
+        },
         assignedTo: {
           select: userSelect,
         },
@@ -438,8 +466,15 @@ export const getTeamLeadIssues = async (user) => {
         deadline: { lt: now() },
         status: { in: openTaskStatuses },
       },
-      include: {
-        project: true,
+      select: {
+        ...taskSelect,
+        project: {
+          select: {
+            id: true,
+            title: true,
+            status: true,
+          },
+        },
         assignedTo: {
           select: userSelect,
         },
@@ -449,12 +484,7 @@ export const getTeamLeadIssues = async (user) => {
       where: {
         id: { in: projectIds },
       },
-      include: {
-        assignedTeam: true,
-        tasks: {
-          select: taskSelect,
-        },
-      },
+      select: projectHealthSelect,
     }),
   ]);
 
@@ -465,7 +495,10 @@ export const getTeamLeadIssues = async (user) => {
   };
 };
 
-export const getMemberSummary = async (user) => {
+export const getTeamLeadIssues = (user) =>
+  cacheDashboard(user, "team-lead-issues", () => getTeamLeadIssuesUncached(user));
+
+const getMemberSummaryUncached = async (user) => {
   const taskWhere = {
     project: {
       organizationId: user.organizationId,
@@ -503,7 +536,9 @@ export const getMemberSummary = async (user) => {
   };
 };
 
-export const getMemberActivity = async (user) => {
+export const getMemberSummary = (user) => cacheDashboard(user, "member-summary", () => getMemberSummaryUncached(user));
+
+const getMemberActivityUncached = async (user) => {
   const [recentCompletedTasks, recentUpdates, recentNotifications] = await Promise.all([
     prisma.task.findMany({
       where: {
@@ -513,8 +548,15 @@ export const getMemberActivity = async (user) => {
           organizationId: user.organizationId,
         },
       },
-      include: {
-        project: true,
+      select: {
+        ...taskSelect,
+        project: {
+          select: {
+            id: true,
+            title: true,
+            status: true,
+          },
+        },
       },
       orderBy: {
         updatedAt: "desc",
@@ -549,7 +591,10 @@ export const getMemberActivity = async (user) => {
   };
 };
 
-export const getMemberPerformance = async (user) => {
+export const getMemberActivity = (user) =>
+  cacheDashboard(user, "member-activity", () => getMemberActivityUncached(user));
+
+const getMemberPerformanceUncached = async (user) => {
   const tasks = await prisma.task.findMany({
     where: {
       assignedToId: user.id,
@@ -578,3 +623,6 @@ export const getMemberPerformance = async (user) => {
     }),
   };
 };
+
+export const getMemberPerformance = (user) =>
+  cacheDashboard(user, "member-performance", () => getMemberPerformanceUncached(user));

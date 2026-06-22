@@ -1,5 +1,6 @@
 import prisma from "../config/prisma.js";
 import ApiError from "../utils/apiError.js";
+import { buildCacheKey, cacheTtl, getOrSetCache } from "./cache.service.js";
 import {
   activeProjectStatuses,
   buildProjectRiskMessages,
@@ -67,6 +68,13 @@ const projectInclude = {
     select: taskSelect,
   },
 };
+
+const cacheReport = (user, name, query, factory, id = null) =>
+  getOrSetCache(
+    buildCacheKey("report", name, user.organizationId, user.id, user.role, id, query || {}),
+    cacheTtl.report,
+    factory,
+  );
 
 const parseDate = (value, fieldName) => {
   if (!value) {
@@ -285,7 +293,7 @@ const getAccessibleProject = async (projectId, user) => {
   return project;
 };
 
-export const getProjectReport = async (user, projectId, query) => {
+const getProjectReportUncached = async (user, projectId, query) => {
   assertReportRole(user, ["ADMIN", "TEAM_LEAD", "TEAM_MEMBER"]);
   const filters = parseFilters(query);
   const project = await getAccessibleProject(projectId, user);
@@ -294,7 +302,10 @@ export const getProjectReport = async (user, projectId, query) => {
   return formatProjectReport(project, filters);
 };
 
-export const getTeamReport = async (user, teamId, query) => {
+export const getProjectReport = (user, projectId, query) =>
+  cacheReport(user, "project", query, () => getProjectReportUncached(user, projectId, query), projectId);
+
+const getTeamReportUncached = async (user, teamId, query) => {
   assertReportRole(user, ["ADMIN", "TEAM_LEAD"]);
   validateUuid(teamId, "teamId");
   const filters = parseFilters(query);
@@ -353,6 +364,9 @@ export const getTeamReport = async (user, teamId, query) => {
   };
 };
 
+export const getTeamReport = (user, teamId, query) =>
+  cacheReport(user, "team", query, () => getTeamReportUncached(user, teamId, query), teamId);
+
 const assertMemberReportAccess = async (user, memberId) => {
   validateUuid(memberId, "memberId");
 
@@ -392,7 +406,7 @@ const assertMemberReportAccess = async (user, memberId) => {
   };
 };
 
-export const getMemberReport = async (user, memberId, query) => {
+const getMemberReportUncached = async (user, memberId, query) => {
   assertReportRole(user, ["ADMIN", "TEAM_LEAD", "TEAM_MEMBER"]);
   const filters = parseFilters(query);
   const memberAccess = await assertMemberReportAccess(user, memberId);
@@ -458,7 +472,10 @@ export const getMemberReport = async (user, memberId, query) => {
   };
 };
 
-export const getDeliveryReport = async (user, query) => {
+export const getMemberReport = (user, memberId, query) =>
+  cacheReport(user, "member", query, () => getMemberReportUncached(user, memberId, query), memberId);
+
+const getDeliveryReportUncached = async (user, query) => {
   assertReportRole(user, ["ADMIN"]);
   const filters = parseFilters(query);
 
@@ -494,7 +511,10 @@ export const getDeliveryReport = async (user, query) => {
   };
 };
 
-export const getExecutiveSummary = async (user, query) => {
+export const getDeliveryReport = (user, query) =>
+  cacheReport(user, "delivery", query, () => getDeliveryReportUncached(user, query));
+
+const getExecutiveSummaryUncached = async (user, query) => {
   assertReportRole(user, ["ADMIN"]);
   const filters = parseFilters(query);
 
@@ -584,5 +604,8 @@ export const getExecutiveSummary = async (user, query) => {
     recommendations: [],
   };
 };
+
+export const getExecutiveSummary = (user, query) =>
+  cacheReport(user, "executive", query, () => getExecutiveSummaryUncached(user, query));
 
 export const parseReportFilters = parseFilters;

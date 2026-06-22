@@ -1,7 +1,9 @@
 import jwt from "jsonwebtoken";
 import prisma from "../config/prisma.js";
+import logger from "../config/logger.js";
 import ApiError from "../utils/apiError.js";
 import logActivity from "../utils/activityLogger.js";
+import { getRequestLoggerMeta } from "../utils/requestContext.js";
 import {
   buildGithubOAuthUrl,
   decryptGithubToken,
@@ -151,6 +153,8 @@ export const getGithubConnectUrl = (user) => {
 };
 
 export const handleGithubOAuthCallback = async ({ code, state }) => {
+  const start = performance.now();
+
   if (!code || !state) {
     throw new ApiError(400, "GitHub OAuth code and state are required");
   }
@@ -162,10 +166,12 @@ export const handleGithubOAuthCallback = async ({ code, state }) => {
   try {
     decodedState = jwt.verify(state, process.env.JWT_SECRET);
   } catch {
+    logger.warn({ ...getRequestLoggerMeta(), status: "failed" }, "GitHub OAuth callback failure");
     throw new ApiError(400, "Invalid GitHub OAuth state");
   }
 
   if (decodedState.purpose !== "github_oauth") {
+    logger.warn({ ...getRequestLoggerMeta(), status: "failed" }, "GitHub OAuth callback failure");
     throw new ApiError(400, "Invalid GitHub OAuth state");
   }
 
@@ -208,6 +214,16 @@ export const handleGithubOAuthCallback = async ({ code, state }) => {
     },
   });
 
+  logger.info(
+    {
+      ...getRequestLoggerMeta(),
+      userId: updatedUser.id,
+      status: "success",
+      durationMs: Math.round(performance.now() - start),
+    },
+    "GitHub OAuth callback success",
+  );
+
   return {
     user: updatedUser,
     githubProfile: {
@@ -245,6 +261,17 @@ export const connectRepositoryToProject = async (user, payload) => {
   validateUuid(projectId, "projectId");
 
   const { owner, name } = normalizeRepositoryInput(payload);
+  logger.info(
+    {
+      ...getRequestLoggerMeta(),
+      userId: user.id,
+      projectId,
+      repository: `${owner}/${name}`,
+      status: "started",
+    },
+    "GitHub repository sync request",
+  );
+
   const [project, token] = await Promise.all([getAccessibleProject(user, projectId), getGithubTokenForUser(user.id)]);
   const repositoryResponse = await githubRequest({
     token,
@@ -253,6 +280,16 @@ export const connectRepositoryToProject = async (user, payload) => {
   const repository = repositoryResponse.data;
 
   if (String(repository.owner?.login).toLowerCase() !== owner.toLowerCase()) {
+    logger.warn(
+      {
+        ...getRequestLoggerMeta(),
+        userId: user.id,
+        projectId,
+        repository: `${owner}/${name}`,
+        status: "failed",
+      },
+      "GitHub repository sync request failed",
+    );
     throw new ApiError(400, "Repository owner does not match GitHub response");
   }
 
@@ -297,12 +334,25 @@ export const connectRepositoryToProject = async (user, payload) => {
     return connectedProject;
   });
 
-  return {
+  const result = {
     projectId: updatedProject.id,
     repository: `${updatedProject.githubRepositoryOwner}/${updatedProject.githubRepositoryName}`,
     repositoryUrl: updatedProject.repositoryUrl,
     defaultBranch: updatedProject.githubDefaultBranch,
   };
+
+  logger.info(
+    {
+      ...getRequestLoggerMeta(),
+      userId: user.id,
+      projectId: result.projectId,
+      repository: result.repository,
+      status: "success",
+    },
+    "GitHub repository sync request completed",
+  );
+
+  return result;
 };
 
 export const getRepositoryOverview = async (user, projectId) => {

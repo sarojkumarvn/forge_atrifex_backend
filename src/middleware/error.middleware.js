@@ -1,4 +1,5 @@
 import { AppError } from "../utils/errors.js";
+import { captureError } from "../utils/errorReporter.js";
 
 const prismaErrorStatus = {
   P2002: 409,
@@ -19,8 +20,12 @@ const errorMiddleware = (error, req, res, next) => {
   const isOperational = error instanceof AppError || statusCode < 500;
   const message = isOperational || !isProduction ? error.message : "Internal server error";
 
-  if (!isProduction) {
-    console.error(error);
+  if (statusCode >= 500) {
+    captureError(error, {
+      method: req.method,
+      path: req.path,
+      statusCode,
+    });
   }
 
   const response = {
