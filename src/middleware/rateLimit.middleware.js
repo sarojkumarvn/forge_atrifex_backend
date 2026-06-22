@@ -3,6 +3,12 @@ import rateLimit from "express-rate-limit";
 const rateLimitResponse = {
   success: false,
   message: "Too many requests. Please try again later.",
+  errors: [
+    {
+      field: "rateLimit",
+      message: "Too many requests. Please try again later.",
+    },
+  ],
 };
 
 const createRateLimiter = ({ windowMs, max }) =>

@@ -101,6 +101,42 @@ describe("tasks", () => {
     expect(response.status).toBe(400);
   });
 
+  test("invalid task progress value is rejected by validation", async () => {
+    const data = await seedTestData();
+
+    const response = await request(app)
+      .patch(`/api/tasks/${data.task.id}/progress`)
+      .set(authHeader(data.tokens.member))
+      .send({ progress: 101 });
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toBe("Validation failed");
+    expect(response.body.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: "body.progress",
+        }),
+      ]),
+    );
+  });
+
+  test("invalid task priority enum is rejected", async () => {
+    const data = await seedTestData();
+
+    const response = await request(app)
+      .post("/api/tasks")
+      .set(authHeader(data.tokens.lead))
+      .send({
+        title: "Bad Priority Task",
+        projectId: data.project.id,
+        assigneeId: data.users.member.id,
+        priority: "CRITICAL",
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toBe("Validation failed");
+  });
+
   test("task reassignment validates assignee belongs to team", async () => {
     const data = await seedTestData();
 

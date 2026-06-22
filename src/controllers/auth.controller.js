@@ -100,6 +100,11 @@ export const register = async (req, res, next) => {
     return res.status(201).json({
       success: true,
       message: "Registration successful",
+      data: {
+        token,
+        user: safeUser,
+        dashboardPath: getDashboardPath(safeUser.role),
+      },
       token,
       user: safeUser,
       dashboardPath: getDashboardPath(safeUser.role),
@@ -170,6 +175,11 @@ export const login = async (req, res, next) => {
     return res.json({
       success: true,
       message: "Login successful",
+      data: {
+        token,
+        user: safeUser,
+        dashboardPath: getDashboardPath(safeUser.role),
+      },
       token,
       user: safeUser,
       dashboardPath: getDashboardPath(safeUser.role),
@@ -188,6 +198,10 @@ export const me = async (req, res) => {
 
   return res.json({
     success: true,
+    data: {
+      user: formatSafeUser(user),
+      dashboardPath: getDashboardPath(user.role),
+    },
     user: formatSafeUser(user),
     dashboardPath: getDashboardPath(user.role),
   });
@@ -197,5 +211,6 @@ export const logout = async (req, res) => {
   return res.json({
     success: true,
     message: "Logout successful",
+    data: {},
   });
 };

@@ -16,6 +16,7 @@ import taskRoutes from "./routes/task.routes.js";
 import teamRoutes from "./routes/team.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import { validateEnv } from "./config/env.js";
+import errorMiddleware from "./middleware/error.middleware.js";
 import {
   aiRateLimiter,
   authRateLimiter,
@@ -49,6 +50,7 @@ app.get("/", (req, res) => {
   res.json({
     success: true,
     message: "Forge AtriFex Backend Running",
+    data: {},
   });
 });
 
@@ -56,7 +58,9 @@ app.get("/api/health", (req, res) => {
   res.json({
     success: true,
     message: "API is healthy",
-    timestamp: new Date().toISOString(),
+    data: {
+      timestamp: new Date().toISOString(),
+    },
   });
 });
 
@@ -87,13 +91,6 @@ app.use((req, res) => {
   });
 });
 
-app.use((error, req, res, next) => {
-  console.error(error);
-
-  res.status(error.statusCode || 500).json({
-    success: false,
-    message: error.message || "Internal server error",
-  });
-});
+app.use(errorMiddleware);
 
 export default app;

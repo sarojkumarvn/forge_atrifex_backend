@@ -1,22 +1,17 @@
 import jwt from "jsonwebtoken";
 import prisma from "../config/prisma.js";
+import { InternalServerError, UnauthorizedError } from "../utils/errors.js";
 
 const authMiddleware = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({
-        success: false,
-        message: "Authorization token is required",
-      });
+      throw new UnauthorizedError("Authorization token is required");
     }
 
     if (!process.env.JWT_SECRET) {
-      return res.status(500).json({
-        success: false,
-        message: "JWT_SECRET is not configured",
-      });
+      throw new InternalServerError("JWT_SECRET is not configured");
     }
 
     const token = authHeader.split(" ")[1];
@@ -47,19 +42,17 @@ const authMiddleware = async (req, res, next) => {
     });
 
     if (!user || !user.isActive) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid or inactive user",
-      });
+      throw new UnauthorizedError("Invalid or inactive user");
     }
 
     req.user = user;
     return next();
   } catch (error) {
-    return res.status(401).json({
-      success: false,
-      message: "Invalid or expired token",
-    });
+    if (error.statusCode) {
+      return next(error);
+    }
+
+    return next(new UnauthorizedError("Invalid or expired token"));
   }
 };
 

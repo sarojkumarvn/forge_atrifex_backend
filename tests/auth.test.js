@@ -59,6 +59,50 @@ describe("authentication", () => {
     expect(response.status).toBe(401);
   });
 
+  test("register rejects invalid email", async () => {
+    await resetDatabase();
+
+    const response = await request(app).post("/api/auth/register").send({
+      fullName: "Invalid Email",
+      email: "not-an-email",
+      password: "Password@123",
+      organizationName: "Email Test Org",
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.success).toBe(false);
+    expect(response.body.message).toBe("Validation failed");
+    expect(response.body.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: "body.email",
+          message: "Invalid email address",
+        }),
+      ]),
+    );
+  });
+
+  test("register rejects missing required fields", async () => {
+    await resetDatabase();
+
+    const response = await request(app).post("/api/auth/register").send({
+      email: "missing@example.com",
+      password: "Password@123",
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: "body.fullName",
+        }),
+        expect.objectContaining({
+          field: "body.organizationName",
+        }),
+      ]),
+    );
+  });
+
   test("/me returns safe user fields", async () => {
     const data = await seedTestData();
 

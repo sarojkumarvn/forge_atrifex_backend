@@ -2,11 +2,8 @@ export const sendSuccess = (res, statusCode, message, data = null, meta = null) 
   const response = {
     success: true,
     message,
+    data: data ?? {},
   };
-
-  if (data !== null) {
-    response.data = data;
-  }
 
   if (meta !== null) {
     response.meta = meta;

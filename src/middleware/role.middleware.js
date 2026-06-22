@@ -1,17 +1,13 @@
+import { ForbiddenError, UnauthorizedError } from "../utils/errors.js";
+
 const roleMiddleware = (...allowedRoles) => {
   return (req, res, next) => {
     if (!req.user) {
-      return res.status(401).json({
-        success: false,
-        message: "Authentication required",
-      });
+      return next(new UnauthorizedError("Authentication required"));
     }
 
     if (!allowedRoles.includes(req.user.role)) {
-      return res.status(403).json({
-        success: false,
-        message: "You are not authorized to access this resource",
-      });
+      return next(new ForbiddenError("You are not authorized to access this resource"));
     }
 
     return next();

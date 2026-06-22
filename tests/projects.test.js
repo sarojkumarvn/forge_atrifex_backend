@@ -67,6 +67,36 @@ describe("projects", () => {
     expect(response.status).toBe(403);
   });
 
+  test("invalid project UUID is rejected by validation", async () => {
+    const data = await seedTestData();
+
+    const response = await request(app)
+      .get("/api/projects/not-a-uuid")
+      .set(authHeader(data.tokens.admin));
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toBe("Validation failed");
+    expect(response.body.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: "params.id",
+        }),
+      ]),
+    );
+  });
+
+  test("invalid project status enum is rejected", async () => {
+    const data = await seedTestData();
+
+    const response = await request(app)
+      .patch(`/api/projects/${data.project.id}`)
+      .set(authHeader(data.tokens.admin))
+      .send({ status: "ACTIVE_NOW" });
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toBe("Validation failed");
+  });
+
   test("cannot assign project to team from another organization", async () => {
     const data = await seedTestData();
 
