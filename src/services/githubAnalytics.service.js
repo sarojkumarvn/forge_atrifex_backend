@@ -1,4 +1,11 @@
 import { githubPaginatedRequest, githubRequest } from "../utils/githubClient.js";
+import { buildCacheKey, cacheTtl, getOrSetCache } from "./cache.service.js";
+
+const githubAnalyticsPageLimit = 2;
+
+const cacheGithubAnalytics = ({ owner, repo }, type, factory) =>
+  // Reuse repository metadata to reduce GitHub API consumption during dashboard refreshes.
+  getOrSetCache(buildCacheKey("github", owner, repo, type), cacheTtl.github, factory);
 
 const oneWeekAgoIso = () => {
   const date = new Date();
@@ -23,6 +30,7 @@ const incrementContributor = (contributors, username, field, amount = 1) => {
 };
 
 export const getRepositoryOverviewAnalytics = async ({ token, owner, repo }) => {
+  return cacheGithubAnalytics({ owner, repo }, "overview", async () => {
   const [repositoryResponse, contributors, openIssues] = await Promise.all([
     githubRequest({
       token,
@@ -52,13 +60,15 @@ export const getRepositoryOverviewAnalytics = async ({ token, owner, repo }) => 
     contributors: contributors.length,
     defaultBranch: data.default_branch,
   };
+  });
 };
 
 export const getCommitAnalytics = async ({ token, owner, repo }) => {
+  return cacheGithubAnalytics({ owner, repo }, "commits", async () => {
   const commits = await githubPaginatedRequest({
     token,
     path: `/repos/${owner}/${repo}/commits`,
-    maxPages: 5,
+    maxPages: githubAnalyticsPageLimit,
   });
   const weeklyCommits = commits.filter((commit) => {
     const committedAt = commit.commit?.author?.date;
@@ -82,16 +92,18 @@ export const getCommitAnalytics = async ({ token, owner, repo }) => {
       .sort((a, b) => b.commits - a.commits)
       .slice(0, 10),
   };
+  });
 };
 
 export const getPullRequestAnalytics = async ({ token, owner, repo }) => {
+  return cacheGithubAnalytics({ owner, repo }, "pull-requests", async () => {
   const pullRequests = await githubPaginatedRequest({
     token,
     path: `/repos/${owner}/${repo}/pulls`,
     query: {
       state: "all",
     },
-    maxPages: 5,
+    maxPages: githubAnalyticsPageLimit,
   });
 
   const openPRs = pullRequests.filter((pullRequest) => pullRequest.state === "open").length;
@@ -107,9 +119,11 @@ export const getPullRequestAnalytics = async ({ token, owner, repo }) => {
     mergedPRs,
     closedPRs,
   };
+  });
 };
 
 export const getIssueAnalytics = async ({ token, owner, repo }) => {
+  return cacheGithubAnalytics({ owner, repo }, "issues", async () => {
   const [openIssues, closedIssues] = await Promise.all([
     githubPaginatedRequest({
       token,
@@ -117,7 +131,7 @@ export const getIssueAnalytics = async ({ token, owner, repo }) => {
       query: {
         state: "open",
       },
-      maxPages: 5,
+      maxPages: githubAnalyticsPageLimit,
     }),
     githubPaginatedRequest({
       token,
@@ -125,7 +139,7 @@ export const getIssueAnalytics = async ({ token, owner, repo }) => {
       query: {
         state: "closed",
       },
-      maxPages: 5,
+      maxPages: githubAnalyticsPageLimit,
     }),
   ]);
   const openIssueCount = openIssues.filter((issue) => !issue.pull_request).length;
@@ -137,14 +151,16 @@ export const getIssueAnalytics = async ({ token, owner, repo }) => {
     closedIssues: closedIssueCount,
     issueResolutionRate: totalIssues ? Math.round((closedIssueCount / totalIssues) * 100) : 0,
   };
+  });
 };
 
 export const getContributorAnalytics = async ({ token, owner, repo }) => {
+  return cacheGithubAnalytics({ owner, repo }, "contributors", async () => {
   const [commits, pullRequests, closedIssues] = await Promise.all([
     githubPaginatedRequest({
       token,
       path: `/repos/${owner}/${repo}/commits`,
-      maxPages: 5,
+      maxPages: githubAnalyticsPageLimit,
     }),
     githubPaginatedRequest({
       token,
@@ -152,7 +168,7 @@ export const getContributorAnalytics = async ({ token, owner, repo }) => {
       query: {
         state: "all",
       },
-      maxPages: 5,
+      maxPages: githubAnalyticsPageLimit,
     }),
     githubPaginatedRequest({
       token,
@@ -160,7 +176,7 @@ export const getContributorAnalytics = async ({ token, owner, repo }) => {
       query: {
         state: "closed",
       },
-      maxPages: 5,
+      maxPages: githubAnalyticsPageLimit,
     }),
   ]);
   const contributors = new Map();
@@ -186,4 +202,5 @@ export const getContributorAnalytics = async ({ token, owner, repo }) => {
         b.commits + b.pullRequests + b.issuesClosed - (a.commits + a.pullRequests + a.issuesClosed),
     ),
   };
+  });
 };

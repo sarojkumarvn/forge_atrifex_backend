@@ -1,5 +1,8 @@
 import crypto from "crypto";
 import ApiError from "./apiError.js";
+import logger from "../config/logger.js";
+import metrics from "./metrics.js";
+import { getRequestLoggerMeta } from "./requestContext.js";
 
 const defaultGithubApiUrl = "https://api.github.com";
 const githubOAuthAuthorizeUrl = "https://github.com/login/oauth/authorize";
@@ -68,35 +71,68 @@ export const buildGithubOAuthUrl = (state) => {
 
 export const exchangeCodeForToken = async (code) => {
   assertOAuthConfig();
+  const start = performance.now();
+  let latencyRecorded = false;
 
-  const response = await fetch(githubOAuthTokenUrl, {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      client_id: process.env.GITHUB_CLIENT_ID,
-      client_secret: process.env.GITHUB_CLIENT_SECRET,
-      code,
-      redirect_uri: process.env.GITHUB_CALLBACK_URL,
-    }),
-  });
+  try {
+    const response = await fetch(githubOAuthTokenUrl, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        client_id: process.env.GITHUB_CLIENT_ID,
+        client_secret: process.env.GITHUB_CLIENT_SECRET,
+        code,
+        redirect_uri: process.env.GITHUB_CALLBACK_URL,
+      }),
+    });
+    const durationMs = Math.round(performance.now() - start);
+    metrics.recordProviderLatency("github", durationMs);
+    latencyRecorded = true;
 
-  if (!response.ok) {
-    throw new ApiError(502, "GitHub OAuth token exchange failed");
+    if (durationMs > 3000) {
+      logger.warn({ ...getRequestLoggerMeta(), durationMs }, "Slow GitHub OAuth token exchange detected");
+    }
+
+    if (!response.ok) {
+      metrics.recordProviderFailure("github");
+      throw new ApiError(502, "GitHub OAuth token exchange failed");
+    }
+
+    const payload = await response.json();
+
+    if (!payload.access_token) {
+      metrics.recordProviderFailure("github");
+      throw new ApiError(400, payload.error_description || "GitHub OAuth did not return an access token");
+    }
+
+    return {
+      accessToken: payload.access_token,
+      scope: payload.scope || "",
+    };
+  } catch (error) {
+    const durationMs = Math.round(performance.now() - start);
+    if (!latencyRecorded) {
+      metrics.recordProviderLatency("github", durationMs);
+    }
+    metrics.recordProviderFailure("github");
+    logger.error(
+      {
+        ...getRequestLoggerMeta(),
+        status: "failed",
+        durationMs,
+        error: {
+          message: error.message,
+          statusCode: error.statusCode,
+          code: error.code,
+        },
+      },
+      "GitHub OAuth token exchange failed",
+    );
+    throw error;
   }
-
-  const payload = await response.json();
-
-  if (!payload.access_token) {
-    throw new ApiError(400, payload.error_description || "GitHub OAuth did not return an access token");
-  }
-
-  return {
-    accessToken: payload.access_token,
-    scope: payload.scope || "",
-  };
 };
 
 const parseNextLink = (linkHeader) => {
@@ -115,6 +151,7 @@ const parseNextLink = (linkHeader) => {
 };
 
 export const githubRequest = async ({ token, path, method = "GET", body = null, query = null, absoluteUrl = null }) => {
+  const start = performance.now();
   const baseUrl = absoluteUrl || `${getGithubApiUrl()}${path}`;
   const url = new URL(baseUrl);
 
@@ -126,39 +163,94 @@ export const githubRequest = async ({ token, path, method = "GET", body = null, 
     }
   }
 
-  // GitHub API requests always use the caller's OAuth token to enforce repository ownership.
-  const response = await fetch(url, {
-    method,
-    headers: {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${token}`,
-      "X-GitHub-Api-Version": "2022-11-28",
-      ...(body ? { "Content-Type": "application/json" } : {}),
-    },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  });
+  try {
+    // GitHub API requests always use the caller's OAuth token to enforce repository ownership.
+    const response = await fetch(url, {
+      method,
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${token}`,
+        "X-GitHub-Api-Version": "2022-11-28",
+        ...(body ? { "Content-Type": "application/json" } : {}),
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    const durationMs = Math.round(performance.now() - start);
+    metrics.recordProviderLatency("github", durationMs);
 
-  const remainingHeader = response.headers.get("x-ratelimit-remaining");
+    if (durationMs > 3000) {
+      logger.warn(
+        {
+          ...getRequestLoggerMeta(),
+          method,
+          path: url.pathname,
+          status: response.status,
+          durationMs,
+        },
+        "Slow GitHub API request detected",
+      );
+    }
 
-  if ((response.status === 403 && remainingHeader === "0") || response.status === 429) {
-    // Handle GitHub API rate limiting gracefully instead of surfacing provider internals.
-    throw new ApiError(429, "GitHub API rate limit exceeded. Please try again later.");
+    const remainingHeader = response.headers.get("x-ratelimit-remaining");
+
+    if ((response.status === 403 && remainingHeader === "0") || response.status === 429) {
+      metrics.recordGithubRateLimit();
+      metrics.recordProviderFailure("github");
+      logger.warn(
+        {
+          ...getRequestLoggerMeta(),
+          method,
+          path: url.pathname,
+          status: response.status,
+          remaining: remainingHeader,
+        },
+        "GitHub API rate limit event",
+      );
+      // Handle GitHub API rate limiting gracefully instead of surfacing provider internals.
+      throw new ApiError(429, "GitHub API rate limit exceeded. Please try again later.");
+    }
+
+    if (response.status === 404) {
+      metrics.recordProviderFailure("github");
+      throw new ApiError(404, "GitHub resource not found or not accessible");
+    }
+
+    if (!response.ok) {
+      metrics.recordProviderFailure("github");
+      throw new ApiError(502, "GitHub API request failed");
+    }
+
+    const text = await response.text();
+
+    return {
+      data: text ? JSON.parse(text) : null,
+      nextUrl: parseNextLink(response.headers.get("link")),
+    };
+  } catch (error) {
+    const durationMs = Math.round(performance.now() - start);
+
+    if (!error.statusCode) {
+      metrics.recordProviderLatency("github", durationMs);
+      metrics.recordProviderFailure("github");
+    }
+
+    logger.error(
+      {
+        ...getRequestLoggerMeta(),
+        method,
+        path: url.pathname,
+        durationMs,
+        error: {
+          message: error.message,
+          statusCode: error.statusCode,
+          code: error.code,
+        },
+      },
+      "GitHub API request failed",
+    );
+
+    throw error;
   }
-
-  if (response.status === 404) {
-    throw new ApiError(404, "GitHub resource not found or not accessible");
-  }
-
-  if (!response.ok) {
-    throw new ApiError(502, "GitHub API request failed");
-  }
-
-  const text = await response.text();
-
-  return {
-    data: text ? JSON.parse(text) : null,
-    nextUrl: parseNextLink(response.headers.get("link")),
-  };
 };
 
 export const githubPaginatedRequest = async ({ token, path, query = {}, maxPages = 5 }) => {

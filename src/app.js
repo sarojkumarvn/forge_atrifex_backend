@@ -3,12 +3,12 @@ import dotenv from "dotenv";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
-import morgan from "morgan";
 import activityRoutes from "./routes/activity.routes.js";
 import aiRoutes from "./routes/ai.routes.js";
 import authRoutes from "./routes/auth.routes.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
 import githubRoutes from "./routes/github.routes.js";
+import healthRoutes from "./routes/health.routes.js";
 import notificationRoutes from "./routes/notification.routes.js";
 import projectRoutes from "./routes/project.routes.js";
 import reportRoutes from "./routes/report.routes.js";
@@ -17,6 +17,8 @@ import teamRoutes from "./routes/team.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import { validateEnv } from "./config/env.js";
 import errorMiddleware from "./middleware/error.middleware.js";
+import requestIdMiddleware from "./middleware/requestId.middleware.js";
+import requestLogger, { requestMetricsMiddleware } from "./middleware/requestLogger.middleware.js";
 import {
   aiRateLimiter,
   authRateLimiter,
@@ -30,17 +32,15 @@ validateEnv();
 const app = express();
 
 app.use(helmet());
+app.use(requestIdMiddleware);
+app.use(requestLogger);
+app.use(requestMetricsMiddleware);
 app.use(
   cors({
     origin: process.env.CLIENT_URL || "http://localhost:5173",
     credentials: true,
   }),
 );
-
-if (process.env.NODE_ENV === "development") {
-  morgan.token("safe-url", (req) => req.path);
-  app.use(morgan(":method :safe-url :status :response-time ms"));
-}
 
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
@@ -54,15 +54,7 @@ app.get("/", (req, res) => {
   });
 });
 
-app.get("/api/health", (req, res) => {
-  res.json({
-    success: true,
-    message: "API is healthy",
-    data: {
-      timestamp: new Date().toISOString(),
-    },
-  });
-});
+app.use("/api/health", healthRoutes);
 
 if (process.env.NODE_ENV !== "test") {
   app.post("/api/auth/login", authRateLimiter);

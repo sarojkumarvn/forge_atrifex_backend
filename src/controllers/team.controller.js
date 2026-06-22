@@ -117,7 +117,7 @@ const buildSearchWhere = (search) => {
 
 const parsePagination = (pageQuery, limitQuery) => {
   const page = Math.max(Number.parseInt(pageQuery, 10) || 1, 1);
-  const limit = Math.min(Math.max(Number.parseInt(limitQuery, 10) || 10, 1), 100);
+  const limit = Math.min(Math.max(Number.parseInt(limitQuery, 10) || 20, 1), 100);
 
   return {
     page,
