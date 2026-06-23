@@ -4,4 +4,5 @@ export default {
   collectCoverageFrom: ["src/**/*.js", "!src/generated/**"],
   clearMocks: true,
   restoreMocks: true,
+  testTimeout: 30000,
 };
