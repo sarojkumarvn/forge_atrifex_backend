@@ -24,14 +24,19 @@ process.env.GITHUB_API_URL = process.env.GITHUB_API_URL || "https://api.github.t
 const { default: prisma } = await import("../../src/config/prisma.js");
 
 export const resetDatabase = async () => {
-  await prisma.activityLog.deleteMany();
-  await prisma.notification.deleteMany();
-  await prisma.task.deleteMany();
-  await prisma.project.deleteMany();
-  await prisma.teamMembership.deleteMany();
-  await prisma.team.deleteMany();
-  await prisma.user.deleteMany();
-  await prisma.organization.deleteMany();
+  // Reset the full test schema in one statement so FK ordering does not leak rows between suites.
+  await prisma.$executeRawUnsafe(`
+    TRUNCATE TABLE
+      "ActivityLog",
+      "Notification",
+      "Task",
+      "Project",
+      "TeamMembership",
+      "Team",
+      "User",
+      "Organization"
+    RESTART IDENTITY CASCADE
+  `);
 };
 
 export const disconnectDatabase = async () => {
