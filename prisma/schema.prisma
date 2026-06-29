@@ -55,17 +55,21 @@ enum ActivityEntityType {
 }
 
 model Organization {
-  id          String   @id @default(uuid()) @db.Uuid
-  name        String
-  description String?
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id             String   @id @default(uuid()) @db.Uuid
+  name           String
+  nameNormalized String   @unique
+  description    String?
+  isActive       Boolean  @default(true)
+  ownerId        String?  @unique @db.Uuid
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   users        User[]
   teams        Team[]
   projects     Project[]
   activityLogs ActivityLog[]
+  owner        User?            @relation("OrganizationOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  invites      OrganizationInvite[]
 
   @@index([isActive])
   @@index([createdAt])
@@ -89,6 +93,7 @@ model User {
   updatedAt      DateTime @updatedAt
 
   organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ownedOrganization Organization?   @relation("OrganizationOwner")
   ledTeams        Team[]           @relation("TeamLead")
   teamMemberships TeamMembership[]
   createdProjects Project[]        @relation("ProjectCreatedBy")
@@ -101,6 +106,36 @@ model User {
   @@index([role])
   @@index([isActive])
   @@index([createdAt])
+}
+
+enum OrganizationInviteStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
+}
+
+model OrganizationInvite {
+  id            String                  @id @default(uuid()) @db.Uuid
+  organizationId String                 @db.Uuid
+  invitedEmail   String
+  role          UserRole
+  inviteTokenHash String               @unique
+  expiresAt     DateTime
+  acceptedAt    DateTime?
+  revokedAt     DateTime?
+  invitedById   String                  @db.Uuid
+  status        OrganizationInviteStatus @default(PENDING)
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invitedBy    User         @relation(fields: [invitedById], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+  @@index([invitedEmail])
+  @@index([status])
+  @@index([expiresAt])
 }
 
 model Team {

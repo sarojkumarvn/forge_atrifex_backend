@@ -90,6 +90,7 @@ const swaggerDefinition = {
     { name: "Health", description: "Liveness and readiness checks" },
     { name: "Auth", description: "Registration, login, and authenticated identity" },
     { name: "Users", description: "User role administration" },
+    { name: "Organizations", description: "Organization invites, ownership, and membership controls" },
     { name: "Teams", description: "Team CRUD, lead assignment, and member management" },
     { name: "Projects", description: "Project CRUD, assignment, and status management" },
     { name: "Tasks", description: "Task CRUD, progress, status, and reassignment" },
@@ -698,6 +699,67 @@ const swaggerDefinition = {
         dataSchema: { type: "object" },
       }),
     },
+    "/api/auth/accept-invite": {
+      post: {
+        tags: ["Auth"],
+        summary: "Accept an organization invitation",
+        security: [],
+        requestBody: jsonBody("#/components/schemas/AcceptInviteRequest", {
+          inviteToken: "invite_token_value",
+          email: "member@example.com",
+          password: "Password@123",
+          fullName: "New Member",
+        }),
+        responses: {
+          201: successResponse({ $ref: "#/components/schemas/AuthPayload" }, "Invitation accepted"),
+          400: { $ref: "#/components/responses/ValidationError" },
+          403: { $ref: "#/components/responses/Forbidden" },
+          404: { $ref: "#/components/responses/NotFound" },
+          409: { $ref: "#/components/responses/Conflict" },
+        },
+      },
+    },
+    "/api/organizations/invite": {
+      post: protectedOperation({
+        tags: ["Organizations"],
+        summary: "Create organization invite",
+        description: "Requires ADMIN role.",
+        requestBody: jsonBody("#/components/schemas/CreateInviteRequest", {
+          invitedEmail: "member@example.com",
+          role: "TEAM_MEMBER",
+        }),
+        dataSchema: { type: "object" },
+        responses: { 201: successResponse({ type: "object" }, "Invite created") },
+      }),
+    },
+    "/api/organizations/invites": {
+      get: protectedOperation({
+        tags: ["Organizations"],
+        summary: "List organization invites",
+        description: "Requires ADMIN role.",
+        dataSchema: { type: "array", items: { type: "object" } },
+      }),
+    },
+    "/api/organizations/invites/{id}": {
+      delete: protectedOperation({
+        tags: ["Organizations"],
+        summary: "Revoke an organization invite",
+        description: "Requires ADMIN role.",
+        parameters: [uuidParam("id", "Invite ID")],
+        dataSchema: { type: "object" },
+      }),
+    },
+    "/api/organizations/transfer-ownership": {
+      post: protectedOperation({
+        tags: ["Organizations"],
+        summary: "Transfer organization ownership",
+        description: "Requires ADMIN role.",
+        requestBody: jsonBody("#/components/schemas/TransferOwnershipRequest", {
+          nextOwnerId: "00000000-0000-4000-8000-000000000001",
+        }),
+        dataSchema: { type: "object" },
+      }),
+    },
   },
   components: {
     securitySchemes: {
@@ -942,16 +1004,45 @@ const swaggerDefinition = {
       },
       RegisterRequest: {
         type: "object",
-        required: ["fullName", "email", "password", "organizationName"],
+        required: ["fullName", "email", "password"],
         properties: {
           fullName: { type: "string", minLength: 2 },
           email: { type: "string", format: "email" },
           password: { type: "string", minLength: 8, maxLength: 128 },
           organizationName: { type: "string", minLength: 2 },
+          inviteToken: { type: "string" },
           role: { $ref: "#/components/schemas/UserRole" },
           githubUsername: { type: "string" },
           phone: { type: "string" },
           location: { type: "string" },
+        },
+      },
+      AcceptInviteRequest: {
+        type: "object",
+        required: ["inviteToken", "email", "password", "fullName"],
+        properties: {
+          inviteToken: { type: "string" },
+          email: { type: "string", format: "email" },
+          password: { type: "string" },
+          fullName: { type: "string" },
+          githubUsername: { type: "string" },
+          phone: { type: "string" },
+          location: { type: "string" },
+        },
+      },
+      CreateInviteRequest: {
+        type: "object",
+        required: ["invitedEmail", "role"],
+        properties: {
+          invitedEmail: { type: "string", format: "email" },
+          role: { $ref: "#/components/schemas/UserRole" },
+        },
+      },
+      TransferOwnershipRequest: {
+        type: "object",
+        required: ["nextOwnerId"],
+        properties: {
+          nextOwnerId: { type: "string", format: "uuid" },
         },
       },
       LoginRequest: {

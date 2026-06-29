@@ -28,10 +28,10 @@ export const seedTestData = async () => {
   const passwordHash = await bcrypt.hash(password, 12);
 
   const orgA = await prisma.organization.create({
-    data: { name: "Org A" },
+    data: { name: "Org A", nameNormalized: "org a" },
   });
   const orgB = await prisma.organization.create({
-    data: { name: "Org B" },
+    data: { name: "Org B", nameNormalized: "org b" },
   });
 
   const admin = await prisma.user.create({
@@ -42,6 +42,10 @@ export const seedTestData = async () => {
       role: "ADMIN",
       organizationId: orgA.id,
     },
+  });
+  await prisma.organization.update({
+    where: { id: orgA.id },
+    data: { ownerId: admin.id },
   });
   const lead = await prisma.user.create({
     data: {
@@ -80,6 +84,10 @@ export const seedTestData = async () => {
       role: "ADMIN",
       organizationId: orgB.id,
     },
+  });
+  await prisma.organization.update({
+    where: { id: orgB.id },
+    data: { ownerId: adminB.id },
   });
   const leadB = await prisma.user.create({
     data: {

@@ -32,7 +32,7 @@ describe("authentication", () => {
       organizationName: data.orgA.name,
     });
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(409);
   });
 
   test("login works with valid credentials", async () => {

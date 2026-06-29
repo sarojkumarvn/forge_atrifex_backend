@@ -10,7 +10,8 @@ const seed = async () => {
     existingOrganization ||
     (await prisma.organization.create({
       data: {
-      name: "AtriFex Forge Demo Org",
+        name: "AtriFex Forge Demo Org",
+        nameNormalized: "atrifex forge demo org",
       },
     }));
 
@@ -35,6 +36,11 @@ const seed = async () => {
       role: "ADMIN",
       organizationId: organization.id,
     },
+  });
+
+  await prisma.organization.update({
+    where: { id: organization.id },
+    data: { ownerId: admin.id },
   });
 
   const lead = await prisma.user.upsert({
