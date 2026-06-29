@@ -27,6 +27,10 @@ Forge AtriFex supports:
 
 All users belong to an organization. Queries are scoped by `organizationId` so teams, projects, tasks, reports, notifications, and analytics do not leak across tenants.
 
+## Invitations
+
+New users can join an existing organization only through an invitation flow. Public registration can create the first user for a new organization, but it cannot attach a user to an existing organization by name alone.
+
 ## RBAC Rules
 
 - `ADMIN`: organization administration, teams, projects, reports, dashboards, role management

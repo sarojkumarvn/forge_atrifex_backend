@@ -3,6 +3,7 @@
 ## Major Modules
 
 - Authentication and RBAC
+- Organizations and invites
 - Teams
 - Projects
 - Tasks

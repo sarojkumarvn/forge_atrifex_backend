@@ -2,7 +2,12 @@ import bcrypt from "bcrypt";
 import prisma from "../config/prisma.js";
 import generateToken from "../utils/generateToken.js";
 import getDashboardPath from "../utils/dashboardPath.js";
+import ApiError from "../utils/apiError.js";
 import { formatSafeUser, safeUserSelect } from "../utils/safeUser.js";
+import {
+  acceptOrganizationInvite,
+  createOrganizationWithOwner,
+} from "../services/organization.service.js";
 
 const validRoles = new Set(["ADMIN", "TEAM_LEAD", "TEAM_MEMBER"]);
 
@@ -14,6 +19,7 @@ export const register = async (req, res, next) => {
       password,
       role = "TEAM_MEMBER",
       organizationName,
+      inviteToken,
       githubUsername,
       phone,
       location,
@@ -46,53 +52,36 @@ export const register = async (req, res, next) => {
       });
     }
 
-    const normalizedOrganizationName = organizationName?.trim();
-
-    if (!normalizedOrganizationName) {
-      // Never auto-join the first organization because it breaks tenant isolation.
-      return res.status(400).json({
-        success: false,
-        message: "organizationName is required",
-      });
-    }
-
-    const existingOrganization = await prisma.organization.findFirst({
-      where: { name: normalizedOrganizationName },
-    });
-
-    if (existingOrganization && role === "ADMIN") {
-      // Public registration cannot create admins inside existing organizations.
-      return res.status(403).json({
-        success: false,
-        message: "Public registration cannot create admins inside existing organizations",
-      });
-    }
-
-    const assignedRole = existingOrganization ? role || "TEAM_MEMBER" : "ADMIN";
     const passwordHash = await bcrypt.hash(password, 12);
 
-    const user = await prisma.$transaction(async (tx) => {
-      const organization =
-        existingOrganization ||
-        (await tx.organization.create({
-          data: { name: normalizedOrganizationName },
-        }));
+    let user;
 
-      return tx.user.create({
-        data: {
-          fullName: fullName.trim(),
-          email: normalizedEmail,
-          passwordHash,
-          role: assignedRole,
-          organizationId: organization.id,
-          githubUsername: githubUsername?.trim() || null,
-          phone: phone?.trim() || null,
-          location: location?.trim() || null,
-        },
-        // Use explicit selects so secret-bearing fields can never leak in auth responses.
-        select: safeUserSelect,
+    if (inviteToken) {
+      user = await acceptOrganizationInvite({
+        inviteToken,
+        email: normalizedEmail,
+        passwordHash,
+        fullName,
+        githubUsername,
+        phone,
+        location,
       });
-    });
+    } else {
+      if (!organizationName) {
+        throw new ApiError(400, "organizationName is required");
+      }
+
+      const result = await createOrganizationWithOwner({
+        organizationName,
+        fullName,
+        email: normalizedEmail,
+        passwordHash,
+        githubUsername,
+        phone,
+        location,
+      });
+      user = formatSafeUser(result.user);
+    }
 
     const safeUser = formatSafeUser(user);
     const token = generateToken(safeUser);
@@ -213,4 +202,41 @@ export const logout = async (req, res) => {
     message: "Logout successful",
     data: {},
   });
+};
+
+export const acceptInvite = async (req, res, next) => {
+  try {
+    const { inviteToken, email, password, fullName, githubUsername, phone, location } = req.body;
+
+    if (!inviteToken || !email || !password || !fullName) {
+      throw new ApiError(400, "inviteToken, email, password, and fullName are required");
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    const user = await acceptOrganizationInvite({
+      inviteToken,
+      email: email.toLowerCase().trim(),
+      passwordHash,
+      fullName,
+      githubUsername,
+      phone,
+      location,
+    });
+    const token = generateToken(user);
+
+    return res.status(201).json({
+      success: true,
+      message: "Invitation accepted successfully",
+      data: {
+        token,
+        user,
+        dashboardPath: getDashboardPath(user.role),
+      },
+      token,
+      user,
+      dashboardPath: getDashboardPath(user.role),
+    });
+  } catch (error) {
+    return next(error);
+  }
 };

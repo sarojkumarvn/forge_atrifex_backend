@@ -27,7 +27,8 @@ export const resetDatabase = async () => {
   // Reset the full test schema in one statement so FK ordering does not leak rows between suites.
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
-      "ActivityLog",
+    "ActivityLog",
+      "OrganizationInvite",
       "Notification",
       "Task",
       "Project",
