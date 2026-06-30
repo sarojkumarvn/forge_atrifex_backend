@@ -33,7 +33,7 @@ The raw OpenAPI document is available at:
 
 1. Request ID middleware attaches `X-Request-Id`.
 2. Request logging records sanitized request metadata.
-3. Rate limits apply outside test mode.
+3. Rate limits protect authentication, AI, GitHub, and general API routes.
 4. Auth middleware validates JWT for protected routes.
 5. RBAC middleware checks role permissions.
 6. Zod validation parses body, params, and query.

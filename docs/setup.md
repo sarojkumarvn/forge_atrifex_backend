@@ -21,7 +21,6 @@ Create `.env` from `.env.example` and fill the required values:
 
 ```env
 DATABASE_URL=""
-TEST_DATABASE_URL=""
 JWT_SECRET=""
 CLIENT_URL="http://localhost:5173"
 GROQ_API_KEY=""
@@ -67,13 +66,3 @@ Swagger UI is available at:
 ```txt
 http://localhost:5000/api/docs
 ```
-
-## Running Tests
-
-Tests require a separate test database:
-
-```bash
-TEST_DATABASE_URL="postgresql://..." npm test
-```
-
-The suite intentionally refuses to run against `DATABASE_URL`.
