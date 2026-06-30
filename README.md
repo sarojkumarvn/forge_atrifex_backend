@@ -28,7 +28,6 @@ Forge AtriFex Backend is the API platform for an AI-powered project management s
 - Pino
 - NodeCache
 - Swagger UI / OpenAPI 3.0
-- Jest and Supertest
 
 ## Architecture
 
@@ -90,16 +89,9 @@ npx prisma validate
 
 Use a dedicated PostgreSQL database for each environment.
 
-## Testing
+## Manual Verification
 
-```bash
-npm test
-npm run test:coverage
-```
-
-Tests require `TEST_DATABASE_URL` and intentionally refuse to run against `DATABASE_URL`.
-
-See [docs/testing.md](docs/testing.md).
+Use [docs/manual-testing.md](docs/manual-testing.md) for the current product QA checklist.
 
 ## Deployment Notes
 
@@ -113,5 +105,5 @@ See [docs/deployment.md](docs/deployment.md).
 - [Architecture](docs/architecture.md)
 - [Authentication](docs/authentication.md)
 - [Deployment](docs/deployment.md)
-- [Testing](docs/testing.md)
+- [Manual Testing](docs/manual-testing.md)
 - [API Overview](docs/api-overview.md)
