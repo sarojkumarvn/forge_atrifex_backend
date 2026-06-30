@@ -211,6 +211,7 @@ const validateTeamLead = async (leadId, organizationId) => {
       organizationId,
       role: "TEAM_LEAD",
       isActive: true,
+      status: "ACTIVE",
     },
     select: userSelect,
   });
@@ -250,6 +251,7 @@ const validateMemberIds = async (memberIds, organizationId) => {
       organizationId,
       role: "TEAM_MEMBER",
       isActive: true,
+      status: "ACTIVE",
     },
     select: userSelect,
   });

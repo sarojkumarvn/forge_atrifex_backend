@@ -149,6 +149,13 @@ export const login = async (req, res, next) => {
       });
     }
 
+    if (user.status !== "ACTIVE") {
+      return res.status(403).json({
+        success: false,
+        message: "User account is not active",
+      });
+    }
+
     const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
 
     if (!isPasswordValid) {

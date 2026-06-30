@@ -719,6 +719,107 @@ const swaggerDefinition = {
         },
       },
     },
+    "/api/organizations/me": {
+      get: protectedOperation({
+        tags: ["Organizations"],
+        summary: "Get organization profile",
+        description: "Requires ADMIN role.",
+        dataSchema: { type: "object" },
+      }),
+      patch: protectedOperation({
+        tags: ["Organizations"],
+        summary: "Update organization profile",
+        description: "Requires ADMIN role.",
+        requestBody: jsonBody("#/components/schemas/UpdateOrganizationRequest", {
+          name: "AtriFex Labs",
+          website: "https://atrifex.example.com",
+          timezone: "Asia/Kolkata",
+        }),
+        dataSchema: { type: "object" },
+      }),
+    },
+    "/api/organizations/settings": {
+      get: protectedOperation({
+        tags: ["Organizations"],
+        summary: "Get organization settings",
+        description: "Requires ADMIN role.",
+        dataSchema: { type: "object" },
+      }),
+      patch: protectedOperation({
+        tags: ["Organizations"],
+        summary: "Update organization settings",
+        description: "Requires ADMIN role.",
+        requestBody: jsonBody("#/components/schemas/UpdateOrganizationSettingsRequest", {
+          requireAdminApproval: true,
+          defaultMemberRole: "TEAM_MEMBER",
+          notificationsEnabled: true,
+        }),
+        dataSchema: { type: "object" },
+      }),
+    },
+    "/api/organizations/members": {
+      get: protectedOperation({
+        tags: ["Organizations"],
+        summary: "List organization members",
+        description: "Requires ADMIN role. Supports search, role, status, team, pagination, and sorting filters.",
+        parameters: [
+          ...paginationParams,
+          { name: "search", in: "query", schema: { type: "string" } },
+          { name: "role", in: "query", schema: { $ref: "#/components/schemas/UserRole" } },
+          { name: "status", in: "query", schema: { $ref: "#/components/schemas/UserStatus" } },
+          { name: "teamId", in: "query", schema: { type: "string", format: "uuid" } },
+        ],
+        dataSchema: { type: "array", items: { type: "object" } },
+      }),
+    },
+    "/api/organizations/members/{id}": {
+      get: protectedOperation({
+        tags: ["Organizations"],
+        summary: "Get organization member details",
+        description: "Requires ADMIN role.",
+        parameters: [uuidParam("id", "Member ID")],
+        dataSchema: { type: "object" },
+      }),
+      delete: protectedOperation({
+        tags: ["Organizations"],
+        summary: "Remove organization member",
+        description: "Requires ADMIN role. Soft-removes the member by marking the account inactive.",
+        parameters: [uuidParam("id", "Member ID")],
+        dataSchema: { type: "object" },
+      }),
+    },
+    "/api/organizations/members/{id}/status": {
+      patch: protectedOperation({
+        tags: ["Organizations"],
+        summary: "Update organization member status",
+        description: "Requires ADMIN role.",
+        parameters: [uuidParam("id", "Member ID")],
+        requestBody: jsonBody("#/components/schemas/UpdateMemberStatusRequest", { status: "SUSPENDED" }),
+        dataSchema: { type: "object" },
+      }),
+    },
+    "/api/organizations/statistics": {
+      get: protectedOperation({
+        tags: ["Organizations"],
+        summary: "Get organization statistics",
+        description: "Requires ADMIN role.",
+        dataSchema: { type: "object" },
+      }),
+    },
+    "/api/organizations/activity": {
+      get: protectedOperation({
+        tags: ["Organizations"],
+        summary: "Get organization activity",
+        description: "Requires ADMIN role. Reuses organization-scoped ActivityLog entries.",
+        parameters: [
+          ...paginationParams,
+          { name: "search", in: "query", schema: { type: "string" } },
+          { name: "action", in: "query", schema: { type: "string" } },
+          { name: "entityType", in: "query", schema: { type: "string" } },
+        ],
+        dataSchema: { type: "array", items: { $ref: "#/components/schemas/ActivityLog" } },
+      }),
+    },
     "/api/organizations/invite": {
       post: protectedOperation({
         tags: ["Organizations"],
@@ -839,6 +940,7 @@ const swaggerDefinition = {
         },
       },
       UserRole: { type: "string", enum: ["ADMIN", "TEAM_LEAD", "TEAM_MEMBER"] },
+      UserStatus: { type: "string", enum: ["ACTIVE", "INACTIVE", "SUSPENDED"] },
       ProjectStatus: { type: "string", enum: ["PLANNED", "IN_PROGRESS", "ON_HOLD", "COMPLETED", "CANCELLED"] },
       TaskStatus: { type: "string", enum: ["TODO", "IN_PROGRESS", "IN_REVIEW", "BLOCKED", "COMPLETED", "CANCELLED"] },
       TaskPriority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "URGENT"] },
@@ -861,6 +963,7 @@ const swaggerDefinition = {
           phone: { type: "string", nullable: true },
           location: { type: "string", nullable: true },
           isActive: { type: "boolean" },
+          status: { $ref: "#/components/schemas/UserStatus" },
           organizationId: { type: "string", format: "uuid" },
           organization: { $ref: "#/components/schemas/Organization" },
         },
@@ -1036,6 +1139,35 @@ const swaggerDefinition = {
         properties: {
           invitedEmail: { type: "string", format: "email" },
           role: { $ref: "#/components/schemas/UserRole" },
+        },
+      },
+      UpdateOrganizationRequest: {
+        type: "object",
+        properties: {
+          name: { type: "string", minLength: 1, maxLength: 120 },
+          logo: { type: "string", format: "uri" },
+          description: { type: "string", maxLength: 1000 },
+          website: { type: "string", format: "uri" },
+          timezone: { type: "string", maxLength: 80 },
+          companySize: { type: "string", maxLength: 80 },
+        },
+      },
+      UpdateOrganizationSettingsRequest: {
+        type: "object",
+        properties: {
+          allowPublicInvites: { type: "boolean" },
+          requireAdminApproval: { type: "boolean" },
+          defaultMemberRole: { $ref: "#/components/schemas/UserRole" },
+          aiEnabled: { type: "boolean" },
+          githubIntegrationEnabled: { type: "boolean" },
+          notificationsEnabled: { type: "boolean" },
+        },
+      },
+      UpdateMemberStatusRequest: {
+        type: "object",
+        required: ["status"],
+        properties: {
+          status: { $ref: "#/components/schemas/UserStatus" },
         },
       },
       TransferOwnershipRequest: {

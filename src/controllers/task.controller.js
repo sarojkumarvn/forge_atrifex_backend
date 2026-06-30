@@ -316,6 +316,7 @@ const validateAssigneeForTeam = async (assigneeId, teamId, organizationId) => {
       organizationId,
       role: "TEAM_MEMBER",
       isActive: true,
+      status: "ACTIVE",
       teamMemberships: {
         some: {
           teamId,

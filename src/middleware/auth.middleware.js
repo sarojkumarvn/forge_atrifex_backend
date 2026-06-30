@@ -29,6 +29,7 @@ const authMiddleware = async (req, res, next) => {
         phone: true,
         location: true,
         isActive: true,
+        status: true,
         organizationId: true,
         createdAt: true,
         updatedAt: true,
@@ -41,7 +42,7 @@ const authMiddleware = async (req, res, next) => {
       },
     });
 
-    if (!user || !user.isActive) {
+    if (!user || !user.isActive || user.status !== "ACTIVE") {
       throw new UnauthorizedError("Invalid or inactive user");
     }
 

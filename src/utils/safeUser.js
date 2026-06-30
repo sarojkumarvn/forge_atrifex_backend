@@ -9,6 +9,7 @@ export const safeUserSelect = {
   location: true,
   phone: true,
   isActive: true,
+  status: true,
   createdAt: true,
   updatedAt: true,
   organization: {
@@ -30,6 +31,7 @@ export const formatSafeUser = (user) => ({
   location: user.location,
   phone: user.phone,
   isActive: user.isActive,
+  status: user.status,
   createdAt: user.createdAt,
   updatedAt: user.updatedAt,
   ...(user.organization ? { organization: user.organization } : {}),

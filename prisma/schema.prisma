@@ -17,6 +17,12 @@ enum UserRole {
   TEAM_MEMBER
 }
 
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
 enum ProjectStatus {
   PLANNED
   IN_PROGRESS
@@ -59,6 +65,11 @@ model Organization {
   name           String
   nameNormalized String   @unique
   description    String?
+  logo           String?
+  website        String?
+  timezone       String?
+  companySize    String?
+  settings       Json?
   isActive       Boolean  @default(true)
   ownerId        String?  @unique @db.Uuid
   createdAt      DateTime @default(now())
@@ -88,6 +99,7 @@ model User {
   phone          String?
   location       String?
   isActive       Boolean  @default(true)
+  status         UserStatus @default(ACTIVE)
   organizationId String   @db.Uuid
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -101,10 +113,12 @@ model User {
   delegatedTasks  Task[]           @relation("TaskAssignedBy")
   notifications   Notification[]
   activityLogs    ActivityLog[]    @relation("ActivityActor")
+  sentOrganizationInvites OrganizationInvite[]
 
   @@index([organizationId])
   @@index([role])
   @@index([isActive])
+  @@index([status])
   @@index([createdAt])
 }
 

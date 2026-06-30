@@ -36,10 +36,16 @@ const validate = (schema) => (req, res, next) => {
       throw new ValidationError("Validation failed", errors);
     }
 
-    // Parsed values are assigned back so controllers receive trimmed and coerced input.
-    req.body = body.value;
-    req.params = params.value;
-    req.query = query.value;
+    // Parsed values are assigned back only for declared schemas so Express getter-backed fields are not overwritten.
+    if (schema.body) req.body = body.value;
+    if (schema.params) req.params = params.value;
+    if (schema.query) {
+      Object.defineProperty(req, "query", {
+        value: query.value,
+        writable: true,
+        configurable: true,
+      });
+    }
 
     return next();
   } catch (error) {
