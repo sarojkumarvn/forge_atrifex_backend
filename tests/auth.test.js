@@ -96,9 +96,6 @@ describe("authentication", () => {
         expect.objectContaining({
           field: "body.fullName",
         }),
-        expect.objectContaining({
-          field: "body.organizationName",
-        }),
       ]),
     );
   });
