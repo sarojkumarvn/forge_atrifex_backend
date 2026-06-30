@@ -26,12 +26,41 @@ Use this checklist while automated tests are intentionally removed during rapid 
 - Call a protected route without a token and confirm it returns unauthorized.
 - Call `POST /api/auth/logout` and confirm a successful response.
 
+## Account Management
+
+- Call `GET /api/account/me` and confirm only safe current-user fields are returned.
+- Update profile details with `PATCH /api/account/me`, including `fullName`, `avatar`, `phone`, `location`, and `githubUsername`.
+- Confirm profile updates create a notification and `ACCOUNT_PROFILE_UPDATED` activity entry.
+- Change the password with `PATCH /api/account/password` using the current password and a new valid password.
+- Confirm the old password no longer works and the new password logs in successfully.
+- Confirm password changes create a notification and `ACCOUNT_PASSWORD_CHANGED` activity entry.
+- Attempt `PATCH /api/account/deactivate` as the organization owner and confirm ownership transfer is required first.
+- Attempt self-deactivation as the final active admin and confirm it is blocked.
+- Deactivate a non-owner account and confirm the account can no longer access protected APIs.
+
 ## Organization Creation
 
 - Confirm registration creates an organization owned by the first admin.
 - Call `GET /api/organizations/me` as admin and verify organization profile data.
 - Update organization profile with `PATCH /api/organizations/me`.
+- Confirm organization profile updates create an `ORGANIZATION_UPDATED` activity entry.
 - Update organization settings with `PATCH /api/organizations/settings`.
+
+## Organization Members
+
+- List organization members with `GET /api/organizations/members` and verify pagination, search, role, status, and team filters.
+- Fetch a member with `GET /api/organizations/members/:id` and confirm safe profile fields, tasks, projects, and activity summaries.
+- Suspend a member with `PATCH /api/organizations/members/:id/status` using `SUSPENDED`.
+- Confirm a suspended member cannot login or access protected APIs.
+- Confirm suspension creates a notification and `ORGANIZATION_MEMBER_SUSPENDED` activity entry.
+- Reactivate the member with `PATCH /api/organizations/members/:id/status` using `ACTIVE`.
+- Confirm reactivation creates a notification and `ORGANIZATION_MEMBER_ACTIVATED` activity entry.
+- Remove a member with `DELETE /api/organizations/members/:id` and confirm the account is marked inactive, not hard-deleted.
+- Confirm member removal creates a notification and `ORGANIZATION_MEMBER_REMOVED` activity entry.
+- Attempt to suspend, remove, or deactivate the final active admin and confirm it is blocked.
+- Attempt to remove the organization owner and confirm ownership transfer is required first.
+- Transfer ownership with `POST /api/organizations/transfer-ownership`.
+- Confirm ownership transfer promotes the new owner to admin if needed, sends notifications to both users, and creates `ORGANIZATION_OWNERSHIP_TRANSFERRED` activity.
 
 ## Invitation Acceptance
 
