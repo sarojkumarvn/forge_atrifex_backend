@@ -89,6 +89,7 @@ const swaggerDefinition = {
   tags: [
     { name: "Health", description: "Liveness and readiness checks" },
     { name: "Auth", description: "Registration, login, and authenticated identity" },
+    { name: "Account", description: "Current user profile, password, and account lifecycle" },
     { name: "Users", description: "User role administration" },
     { name: "Organizations", description: "Organization invites, ownership, and membership controls" },
     { name: "Teams", description: "Team CRUD, lead assignment, and member management" },
@@ -195,6 +196,47 @@ const swaggerDefinition = {
         tags: ["Auth"],
         summary: "Logout current session",
         dataSchema: { type: "object" },
+      }),
+    },
+    "/api/account/me": {
+      get: protectedOperation({
+        tags: ["Account"],
+        summary: "Get current account profile",
+        description: "Returns safe current-user profile fields only.",
+        dataSchema: { $ref: "#/components/schemas/User" },
+      }),
+      patch: protectedOperation({
+        tags: ["Account"],
+        summary: "Update current account profile",
+        description: "Updates self-service profile fields and records an account activity entry.",
+        requestBody: jsonBody("#/components/schemas/UpdateAccountProfileRequest", {
+          fullName: "Ada Lovelace",
+          avatar: "https://example.com/avatar.png",
+          phone: "+1 555 0100",
+          location: "San Francisco, CA",
+          githubUsername: "ada-lovelace",
+        }),
+        dataSchema: { $ref: "#/components/schemas/User" },
+      }),
+    },
+    "/api/account/password": {
+      patch: protectedOperation({
+        tags: ["Account"],
+        summary: "Change current account password",
+        description: "Requires the current password and sends a password-changed notification.",
+        requestBody: jsonBody("#/components/schemas/ChangePasswordRequest", {
+          currentPassword: "Password@123",
+          newPassword: "NewPassword@123",
+        }),
+        dataSchema: { type: "object", properties: { changed: { type: "boolean" } } },
+      }),
+    },
+    "/api/account/deactivate": {
+      patch: protectedOperation({
+        tags: ["Account"],
+        summary: "Deactivate current account",
+        description: "Prevents owner deactivation and protects the final active organization admin.",
+        dataSchema: { $ref: "#/components/schemas/User" },
       }),
     },
     "/api/users/{id}/role": {
@@ -1139,6 +1181,24 @@ const swaggerDefinition = {
         properties: {
           invitedEmail: { type: "string", format: "email" },
           role: { $ref: "#/components/schemas/UserRole" },
+        },
+      },
+      UpdateAccountProfileRequest: {
+        type: "object",
+        properties: {
+          fullName: { type: "string", minLength: 2, maxLength: 100 },
+          avatar: { type: "string", format: "uri" },
+          phone: { type: "string", maxLength: 40 },
+          location: { type: "string", maxLength: 120 },
+          githubUsername: { type: "string", minLength: 1, maxLength: 39 },
+        },
+      },
+      ChangePasswordRequest: {
+        type: "object",
+        required: ["currentPassword", "newPassword"],
+        properties: {
+          currentPassword: { type: "string", maxLength: 128 },
+          newPassword: { type: "string", minLength: 8, maxLength: 128 },
         },
       },
       UpdateOrganizationRequest: {

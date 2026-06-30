@@ -4,6 +4,7 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import swaggerUi from "swagger-ui-express";
+import accountRoutes from "./routes/account.routes.js";
 import activityRoutes from "./routes/activity.routes.js";
 import aiRoutes from "./routes/ai.routes.js";
 import authRoutes from "./routes/auth.routes.js";
@@ -73,6 +74,7 @@ if (process.env.NODE_ENV !== "test") {
 }
 
 app.use("/api/auth", authRoutes);
+app.use("/api/account", accountRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/teams", teamRoutes);
 app.use("/api/projects", projectRoutes);
