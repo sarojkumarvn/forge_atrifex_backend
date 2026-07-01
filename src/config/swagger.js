@@ -701,6 +701,31 @@ const swaggerDefinition = {
         dataSchema: { type: "object" },
       }),
     },
+    "/api/github/project/{projectId}/repository": {
+      get: protectedOperation({
+        tags: ["GitHub"],
+        summary: "View linked repository",
+        description: "Requires ADMIN, TEAM_LEAD, or TEAM_MEMBER role.",
+        parameters: [uuidParam("projectId", "Project ID")],
+        dataSchema: { $ref: "#/components/schemas/LinkedRepository" },
+      }),
+      delete: protectedOperation({
+        tags: ["GitHub"],
+        summary: "Disconnect linked repository",
+        description: "Requires ADMIN or TEAM_LEAD role. Returns a validation error when no repository is linked.",
+        parameters: [uuidParam("projectId", "Project ID")],
+        dataSchema: { type: "object", properties: { disconnected: { type: "boolean", example: true } } },
+      }),
+    },
+    "/api/github/project/{projectId}/sync": {
+      post: protectedOperation({
+        tags: ["GitHub"],
+        summary: "Synchronize linked repository",
+        description: "Requires ADMIN or TEAM_LEAD role. Fetches commits, pull requests, issues, refreshes metadata, logs activity, and notifies the caller.",
+        parameters: [uuidParam("projectId", "Project ID")],
+        dataSchema: { $ref: "#/components/schemas/GitHubSyncResult" },
+      }),
+    },
     "/api/github/project/{projectId}/overview": {
       get: protectedOperation({
         tags: ["GitHub"],
@@ -717,12 +742,29 @@ const swaggerDefinition = {
         dataSchema: { type: "object" },
       }),
     },
+    "/api/github/project/{projectId}/commit-timeline": {
+      get: protectedOperation({
+        tags: ["GitHub"],
+        summary: "Repository commit timeline",
+        description: "Returns daily commits, weekly commits, top contributors, commit frequency, and paginated commit rows.",
+        parameters: [uuidParam("projectId", "Project ID"), ...paginationParams],
+        dataSchema: { $ref: "#/components/schemas/CommitTimeline" },
+      }),
+    },
     "/api/github/project/{projectId}/pull-requests": {
       get: protectedOperation({
         tags: ["GitHub"],
         summary: "Repository pull request analytics",
         parameters: [uuidParam("projectId", "Project ID")],
         dataSchema: { type: "object" },
+      }),
+    },
+    "/api/github/project/{projectId}/pr-insights": {
+      get: protectedOperation({
+        tags: ["GitHub"],
+        summary: "Repository pull request insights",
+        parameters: [uuidParam("projectId", "Project ID")],
+        dataSchema: { $ref: "#/components/schemas/PullRequestInsights" },
       }),
     },
     "/api/github/project/{projectId}/issues": {
@@ -733,13 +775,48 @@ const swaggerDefinition = {
         dataSchema: { type: "object" },
       }),
     },
+    "/api/github/project/{projectId}/issue-insights": {
+      get: protectedOperation({
+        tags: ["GitHub"],
+        summary: "Repository issue insights",
+        parameters: [uuidParam("projectId", "Project ID")],
+        dataSchema: { $ref: "#/components/schemas/IssueInsights" },
+      }),
+    },
     "/api/github/project/{projectId}/contributors": {
       get: protectedOperation({
         tags: ["GitHub"],
         summary: "Repository contributor analytics",
         parameters: [uuidParam("projectId", "Project ID")],
-        dataSchema: { type: "object" },
+        dataSchema: { $ref: "#/components/schemas/ContributorInsights" },
       }),
+    },
+    "/api/github/webhook": {
+      post: {
+        tags: ["GitHub"],
+        summary: "GitHub webhook receiver",
+        description: "Public GitHub webhook endpoint. Verifies `X-Hub-Signature-256` when `GITHUB_WEBHOOK_SECRET` is configured and routes push, pull_request, issues, repository, and ping skeleton handlers.",
+        security: [],
+        parameters: [
+          { name: "X-GitHub-Event", in: "header", required: true, schema: { type: "string", example: "push" } },
+          { name: "X-GitHub-Delivery", in: "header", required: false, schema: { type: "string" } },
+          { name: "X-Hub-Signature-256", in: "header", required: false, schema: { type: "string" } },
+        ],
+        requestBody: jsonBody("#/components/schemas/GitHubWebhookPayload", {
+          action: "opened",
+          repository: {
+            name: "forge-backend",
+            full_name: "atrifex/forge-backend",
+            owner: { login: "atrifex" },
+          },
+        }),
+        responses: {
+          200: successResponse({ $ref: "#/components/schemas/GitHubWebhookResponse" }, "Webhook accepted"),
+          400: { $ref: "#/components/responses/ValidationError" },
+          401: { $ref: "#/components/responses/Unauthorized" },
+          500: { $ref: "#/components/responses/InternalServerError" },
+        },
+      },
     },
     "/api/auth/accept-invite": {
       post: {
@@ -1099,6 +1176,103 @@ const swaggerDefinition = {
           name: { type: "string" },
           owner: { type: "string" },
           private: { type: "boolean" },
+        },
+      },
+      LinkedRepository: {
+        type: "object",
+        properties: {
+          projectId: { type: "string", format: "uuid" },
+          repository: { type: "string", example: "atrifex/forge-backend" },
+          repositoryUrl: { type: "string", example: "https://github.com/atrifex/forge-backend" },
+          repositoryId: { type: "string" },
+          owner: { type: "string", example: "atrifex" },
+          name: { type: "string", example: "forge-backend" },
+          defaultBranch: { type: "string", example: "main" },
+        },
+      },
+      GitHubSyncResult: {
+        type: "object",
+        properties: {
+          commitsSynced: { type: "integer", example: 48 },
+          pullRequestsSynced: { type: "integer", example: 12 },
+          issuesSynced: { type: "integer", example: 9 },
+          syncedAt: { type: "string", format: "date-time" },
+          repository: { type: "string", example: "atrifex/forge-backend" },
+          defaultBranch: { type: "string", example: "main" },
+        },
+      },
+      CommitTimeline: {
+        type: "object",
+        properties: {
+          dailyCommits: { type: "array", items: { type: "object" } },
+          weeklyCommits: { type: "array", items: { type: "object" } },
+          topContributors: { type: "array", items: { type: "object" } },
+          commitFrequency: { type: "integer" },
+          commits: { type: "array", items: { type: "object" } },
+          pagination: { type: "object" },
+        },
+      },
+      PullRequestInsights: {
+        type: "object",
+        properties: {
+          openPRs: { type: "integer" },
+          mergedPRs: { type: "integer" },
+          averageMergeTimeHours: { type: "number" },
+          reviewActivity: { type: "object" },
+          prTrend: { type: "array", items: { type: "object" } },
+        },
+      },
+      IssueInsights: {
+        type: "object",
+        properties: {
+          openIssues: { type: "integer" },
+          closedIssues: { type: "integer" },
+          averageResolutionTimeHours: { type: "number" },
+          issueTrend: { type: "array", items: { type: "object" } },
+        },
+      },
+      ContributorInsights: {
+        type: "object",
+        properties: {
+          contributors: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                username: { type: "string" },
+                commitCount: { type: "integer" },
+                prCount: { type: "integer" },
+                issuesClosed: { type: "integer" },
+                lastContribution: { type: "string", format: "date-time", nullable: true },
+                contributionScore: { type: "integer" },
+              },
+            },
+          },
+        },
+      },
+      GitHubWebhookPayload: {
+        type: "object",
+        additionalProperties: true,
+        properties: {
+          action: { type: "string" },
+          repository: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              full_name: { type: "string" },
+              owner: { type: "object", additionalProperties: true },
+            },
+          },
+        },
+      },
+      GitHubWebhookResponse: {
+        type: "object",
+        properties: {
+          accepted: { type: "boolean", example: true },
+          event: { type: "string", example: "push" },
+          deliveryId: { type: "string" },
+          message: { type: "string", example: "push webhook accepted" },
+          projectId: { type: "string", format: "uuid", nullable: true },
         },
       },
       AIResponse: {

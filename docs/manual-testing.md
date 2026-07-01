@@ -135,7 +135,23 @@ Use this checklist while automated tests are intentionally removed during rapid 
 - Complete the OAuth callback flow with configured GitHub credentials.
 - Confirm repositories load from `GET /api/github/repositories`.
 - Link a repository to a project with `POST /api/github/connect-repository`.
+- Confirm repository linking creates a repository-connected notification and `GITHUB_REPOSITORY_CONNECTED` activity entry.
+- View the linked repository with `GET /api/github/project/:projectId/repository`.
+- Disconnect the repository with `DELETE /api/github/project/:projectId/repository`.
+- Confirm repository removal creates a repository-disconnected notification and `GITHUB_REPOSITORY_REMOVED` activity entry.
+- Confirm deleting again is rejected when no repository exists.
+- Re-link the repository and run manual sync with `POST /api/github/project/:projectId/sync`.
+- Confirm manual sync returns commits synced, PRs synced, issues synced, and sync timestamp.
+- Confirm sync creates `GITHUB_SYNC_STARTED` and either `GITHUB_SYNC_COMPLETED` or `GITHUB_SYNC_FAILED` activity entries.
+- Confirm sync completed or failed notifications are created for the caller.
 - Verify project repository overview, commits, contributors, issues, and pull request analytics.
+- Verify commit timeline with `GET /api/github/project/:projectId/commit-timeline?page=1&limit=20`.
+- Verify pull request insights with `GET /api/github/project/:projectId/pr-insights`.
+- Verify issue insights with `GET /api/github/project/:projectId/issue-insights`.
+- Verify contributor analytics include commit count, PR count, issues closed, last contribution, and contribution score.
+- Send a GitHub webhook sample to `POST /api/github/webhook` with `X-GitHub-Event`, `X-GitHub-Delivery`, and optional `X-Hub-Signature-256`.
+- Confirm webhook requests log receipt, create `GITHUB_WEBHOOK_RECEIVED` activity when the repository is linked, and notify organization admins.
+- Confirm supported webhook skeletons accept `push`, `pull_request`, `issues`, `repository`, and `ping`.
 - Confirm unconnected users receive a safe error when repository data is requested.
 
 ## Swagger

@@ -1,8 +1,10 @@
+import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import prisma from "../config/prisma.js";
 import logger from "../config/logger.js";
 import ApiError from "../utils/apiError.js";
 import logActivity from "../utils/activityLogger.js";
+import { createNotification, createNotifications } from "../utils/notificationSender.js";
 import { getRequestLoggerMeta } from "../utils/requestContext.js";
 import {
   buildGithubOAuthUrl,
@@ -12,9 +14,9 @@ import {
   githubPaginatedRequest,
   githubRequest,
 } from "../utils/githubClient.js";
+import GitHubSyncService from "./githubSync.service.js";
 import {
   getCommitAnalytics,
-  getContributorAnalytics,
   getIssueAnalytics,
   getPullRequestAnalytics,
   getRepositoryOverviewAnalytics,
@@ -56,7 +58,7 @@ const buildProjectAccessWhere = (user) => ({
     : {}),
 });
 
-const getGithubTokenForUser = async (userId) => {
+export const getGithubTokenForUser = async (userId) => {
   const user = await prisma.user.findUnique({
     where: {
       id: userId,
@@ -73,7 +75,7 @@ const getGithubTokenForUser = async (userId) => {
   return decryptGithubToken(user.githubAccessToken);
 };
 
-const getAccessibleProject = async (user, projectId, { requireRepository = false } = {}) => {
+export const getAccessibleProject = async (user, projectId, { requireRepository = false } = {}) => {
   validateUuid(projectId, "projectId");
 
   const project = await prisma.project.findFirst({
@@ -129,6 +131,48 @@ const getProjectRepositoryContext = async (user, projectId) => {
     owner: project.githubRepositoryOwner,
     repo: project.githubRepositoryName,
     project,
+  };
+};
+
+const notifyUser = async ({ userId, title, message, client = prisma }) =>
+  createNotification({
+    recipientId: userId,
+    title,
+    message,
+    client,
+  });
+
+const getOrganizationAdmins = async (organizationId, client = prisma) =>
+  client.user.findMany({
+    where: {
+      organizationId,
+      role: "ADMIN",
+      isActive: true,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+const verifyGithubWebhookSignature = (rawBody, signatureHeader) => {
+  if (!process.env.GITHUB_WEBHOOK_SECRET) {
+    return { configured: false, verified: false };
+  }
+
+  if (!signatureHeader || !rawBody) {
+    return { configured: true, verified: false };
+  }
+
+  const expected = `sha256=${crypto
+    .createHmac("sha256", process.env.GITHUB_WEBHOOK_SECRET)
+    .update(rawBody)
+    .digest("hex")}`;
+  const expectedBuffer = Buffer.from(expected);
+  const receivedBuffer = Buffer.from(signatureHeader);
+
+  return {
+    configured: true,
+    verified: expectedBuffer.length === receivedBuffer.length && crypto.timingSafeEqual(expectedBuffer, receivedBuffer),
   };
 };
 
@@ -331,6 +375,13 @@ export const connectRepositoryToProject = async (user, payload) => {
       client: tx,
     });
 
+    await notifyUser({
+      userId: user.id,
+      title: "Repository connected",
+      message: `${repository.full_name} was connected to ${project.title}.`,
+      client: tx,
+    });
+
     return connectedProject;
   });
 
@@ -355,6 +406,149 @@ export const connectRepositoryToProject = async (user, payload) => {
   return result;
 };
 
+export const getLinkedProjectRepository = async (user, projectId) => {
+  const project = await getAccessibleProject(user, projectId, { requireRepository: true });
+
+  return {
+    projectId: project.id,
+    repository: `${project.githubRepositoryOwner}/${project.githubRepositoryName}`,
+    repositoryUrl: project.repositoryUrl,
+    repositoryId: project.githubRepositoryId,
+    owner: project.githubRepositoryOwner,
+    name: project.githubRepositoryName,
+    defaultBranch: project.githubDefaultBranch,
+  };
+};
+
+export const disconnectRepositoryFromProject = async (user, projectId) => {
+  const project = await getAccessibleProject(user, projectId, { requireRepository: true });
+  const repository = `${project.githubRepositoryOwner}/${project.githubRepositoryName}`;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.project.update({
+      where: {
+        id: project.id,
+      },
+      data: {
+        repositoryUrl: null,
+        githubRepositoryId: null,
+        githubRepositoryOwner: null,
+        githubRepositoryName: null,
+        githubDefaultBranch: null,
+      },
+    });
+
+    await logActivity({
+      actorId: user.id,
+      organizationId: user.organizationId,
+      action: "GITHUB_REPOSITORY_REMOVED",
+      entityType: "GITHUB_REPOSITORY",
+      entityId: project.id,
+      metadata: {
+        projectId: project.id,
+        repository,
+      },
+      client: tx,
+    });
+
+    await notifyUser({
+      userId: user.id,
+      title: "Repository disconnected",
+      message: `${repository} was disconnected from ${project.title}.`,
+      client: tx,
+    });
+  });
+
+  logger.info(
+    {
+      ...getRequestLoggerMeta(),
+      userId: user.id,
+      projectId: project.id,
+      repository,
+      status: "success",
+    },
+    "GitHub repository disconnected",
+  );
+
+  return {
+    projectId: project.id,
+    repository,
+    disconnected: true,
+  };
+};
+
+export const syncProjectRepository = async (user, projectId) => {
+  const context = await getProjectRepositoryContext(user, projectId);
+
+  await logActivity({
+    actorId: user.id,
+    organizationId: user.organizationId,
+    action: "GITHUB_SYNC_STARTED",
+    entityType: "GITHUB_REPOSITORY",
+    entityId: context.project.id,
+    metadata: {
+      projectId: context.project.id,
+      repository: `${context.owner}/${context.repo}`,
+    },
+  });
+
+  try {
+    const result = await GitHubSyncService.syncRepository({
+      token: context.token,
+      project: context.project,
+    });
+
+    await prisma.$transaction(async (tx) => {
+      await logActivity({
+        actorId: user.id,
+        organizationId: user.organizationId,
+        action: "GITHUB_SYNC_COMPLETED",
+        entityType: "GITHUB_REPOSITORY",
+        entityId: context.project.id,
+        metadata: {
+          projectId: context.project.id,
+          ...result,
+        },
+        client: tx,
+      });
+
+      await notifyUser({
+        userId: user.id,
+        title: "Repository sync completed",
+        message: `${result.repository} synced successfully.`,
+        client: tx,
+      });
+    });
+
+    return result;
+  } catch (error) {
+    await prisma.$transaction(async (tx) => {
+      await logActivity({
+        actorId: user.id,
+        organizationId: user.organizationId,
+        action: "GITHUB_SYNC_FAILED",
+        entityType: "GITHUB_REPOSITORY",
+        entityId: context.project.id,
+        metadata: {
+          projectId: context.project.id,
+          repository: `${context.owner}/${context.repo}`,
+          error: error.message,
+        },
+        client: tx,
+      });
+
+      await notifyUser({
+        userId: user.id,
+        title: "Repository sync failed",
+        message: `${context.owner}/${context.repo} could not be synced.`,
+        client: tx,
+      });
+    });
+
+    throw error;
+  }
+};
+
 export const getRepositoryOverview = async (user, projectId) => {
   const context = await getProjectRepositoryContext(user, projectId);
   return getRepositoryOverviewAnalytics(context);
@@ -377,5 +571,113 @@ export const getRepositoryIssues = async (user, projectId) => {
 
 export const getRepositoryContributors = async (user, projectId) => {
   const context = await getProjectRepositoryContext(user, projectId);
-  return getContributorAnalytics(context);
+  return GitHubSyncService.getContributorInsights(context);
+};
+
+export const getRepositoryCommitTimeline = async (user, projectId, query) => {
+  const context = await getProjectRepositoryContext(user, projectId);
+  return GitHubSyncService.getCommitTimeline({ ...context, pagination: query });
+};
+
+export const getRepositoryPullRequestInsights = async (user, projectId) => {
+  const context = await getProjectRepositoryContext(user, projectId);
+  return GitHubSyncService.getPullRequestInsights(context);
+};
+
+export const getRepositoryIssueInsights = async (user, projectId) => {
+  const context = await getProjectRepositoryContext(user, projectId);
+  return GitHubSyncService.getIssueInsights(context);
+};
+
+export const handleGithubWebhook = async ({ event, deliveryId, signature, rawBody, payload }) => {
+  const signatureResult = verifyGithubWebhookSignature(rawBody, signature);
+
+  if (signatureResult.configured && !signatureResult.verified) {
+    throw new ApiError(401, "Invalid GitHub webhook signature");
+  }
+
+  logger.info(
+    {
+      ...getRequestLoggerMeta(),
+      event,
+      deliveryId,
+      repository: payload.repository?.full_name,
+      signatureVerified: signatureResult.verified,
+    },
+    "GitHub webhook received",
+  );
+
+  if (!["push", "pull_request", "issues", "repository", "ping"].includes(event)) {
+    return {
+      accepted: true,
+      event,
+      deliveryId,
+      message: "Event accepted but not routed",
+    };
+  }
+
+  const repositoryOwner = payload.repository?.owner?.login || payload.repository?.owner?.name;
+  const repositoryName = payload.repository?.name;
+  const linkedProject =
+    repositoryOwner && repositoryName
+      ? await prisma.project.findFirst({
+          where: {
+            githubRepositoryOwner: repositoryOwner,
+            githubRepositoryName: repositoryName,
+          },
+          select: {
+            id: true,
+            title: true,
+            organizationId: true,
+            githubRepositoryOwner: true,
+            githubRepositoryName: true,
+          },
+        })
+      : null;
+
+  if (linkedProject) {
+    await prisma.$transaction(async (tx) => {
+      await logActivity({
+        actorId: null,
+        organizationId: linkedProject.organizationId,
+        action: "GITHUB_WEBHOOK_RECEIVED",
+        entityType: "GITHUB_REPOSITORY",
+        entityId: linkedProject.id,
+        metadata: {
+          event,
+          deliveryId,
+          repository: payload.repository?.full_name,
+          action: payload.action,
+          supported: true,
+        },
+        client: tx,
+      });
+
+      const admins = await getOrganizationAdmins(linkedProject.organizationId, tx);
+      await createNotifications({
+        notifications: admins.map((admin) => ({
+          recipientId: admin.id,
+          title: "GitHub webhook received",
+          message: `${event} received for ${payload.repository?.full_name || linkedProject.title}.`,
+        })),
+        client: tx,
+      });
+    });
+  }
+
+  const routing = {
+    push: "push webhook accepted",
+    pull_request: "pull request webhook accepted",
+    issues: "issues webhook accepted",
+    repository: "repository webhook accepted",
+    ping: "pong",
+  };
+
+  return {
+    accepted: true,
+    event,
+    deliveryId,
+    message: routing[event],
+    projectId: linkedProject?.id || null,
+  };
 };
