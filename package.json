@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:validate": "prisma validate"
   },
   "prisma": {
@@ -26,7 +28,6 @@
     "express-rate-limit": "^8.5.2",
     "helmet": "^8.2.0",
     "jsonwebtoken": "^9.0.3",
-    "morgan": "^1.11.0",
     "node-cache": "^5.1.2",
     "pg": "^8.22.0",
     "pino": "^10.3.1",

@@ -1,6 +1,6 @@
-import jwt from "jsonwebtoken";
 import prisma from "../config/prisma.js";
-import { InternalServerError, UnauthorizedError } from "../utils/errors.js";
+import { UnauthorizedError } from "../utils/errors.js";
+import { assertTokenMatchesUser, verifyAccessToken } from "../utils/jwt.js";
 
 const authMiddleware = async (req, res, next) => {
   try {
@@ -10,12 +10,8 @@ const authMiddleware = async (req, res, next) => {
       throw new UnauthorizedError("Authorization token is required");
     }
 
-    if (!process.env.JWT_SECRET) {
-      throw new InternalServerError("JWT_SECRET is not configured");
-    }
-
     const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = verifyAccessToken(token);
 
     const user = await prisma.user.findUnique({
       where: { id: decoded.id },
@@ -30,6 +26,7 @@ const authMiddleware = async (req, res, next) => {
         location: true,
         isActive: true,
         status: true,
+        tokenVersion: true,
         organizationId: true,
         createdAt: true,
         updatedAt: true,
@@ -45,6 +42,8 @@ const authMiddleware = async (req, res, next) => {
     if (!user || !user.isActive || user.status !== "ACTIVE") {
       throw new UnauthorizedError("Invalid or inactive user");
     }
+
+    assertTokenMatchesUser(decoded, user);
 
     req.user = user;
     return next();

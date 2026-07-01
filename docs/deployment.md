@@ -31,10 +31,22 @@ Typical Render configuration:
 - Health check path: `/api/health/live`
 - Readiness path for release validation: `/api/health/ready`
 
+## Prisma Deployment Workflow
+
+Run these commands before production startup:
+
+```bash
+npm run prisma:validate
+npm run prisma:generate
+npm run prisma:migrate:deploy
+```
+
 ## Production Checklist
 
 - Confirm `NODE_ENV=production`
 - Use strong `JWT_SECRET`
+- Confirm all production-required environment variables are present
+- Confirm `GITHUB_WEBHOOK_SECRET` is configured
 - Configure GitHub OAuth callback URL to the production API
 - Configure CORS with the production frontend origin
 - Verify `/api/health/ready`

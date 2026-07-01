@@ -1,4 +1,3 @@
-import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import prisma from "../config/prisma.js";
 import logger from "../config/logger.js";
@@ -14,6 +13,7 @@ import {
   githubPaginatedRequest,
   githubRequest,
 } from "../utils/githubClient.js";
+import { createSha256HmacSignature, timingSafeEqualString } from "../utils/secretCrypto.js";
 import GitHubSyncService from "./githubSync.service.js";
 import {
   getCommitAnalytics,
@@ -154,26 +154,35 @@ const getOrganizationAdmins = async (organizationId, client = prisma) =>
     },
   });
 
-const verifyGithubWebhookSignature = (rawBody, signatureHeader) => {
-  if (!process.env.GITHUB_WEBHOOK_SECRET) {
-    return { configured: false, verified: false };
+const verifyGithubWebhookSignature = ({ rawBody, signatureHeader }) => {
+  const production = process.env.NODE_ENV === "production";
+  const secret = process.env.GITHUB_WEBHOOK_SECRET;
+
+  if (!secret) {
+    if (production) {
+      throw new ApiError(500, "GitHub webhook secret is not configured");
+    }
+
+    return { configured: false, verified: false, required: false };
   }
 
-  if (!signatureHeader || !rawBody) {
-    return { configured: true, verified: false };
+  if (!signatureHeader) {
+    throw new ApiError(401, "GitHub webhook signature is required");
   }
 
-  const expected = `sha256=${crypto
-    .createHmac("sha256", process.env.GITHUB_WEBHOOK_SECRET)
-    .update(rawBody)
-    .digest("hex")}`;
-  const expectedBuffer = Buffer.from(expected);
-  const receivedBuffer = Buffer.from(signatureHeader);
+  if (!/^sha256=[a-f0-9]{64}$/i.test(signatureHeader)) {
+    throw new ApiError(401, "Invalid GitHub webhook signature");
+  }
 
-  return {
-    configured: true,
-    verified: expectedBuffer.length === receivedBuffer.length && crypto.timingSafeEqual(expectedBuffer, receivedBuffer),
-  };
+  // Compare HMACs in constant time to avoid leaking signature validity through timing.
+  const expected = createSha256HmacSignature({ secret, value: rawBody });
+  const verified = timingSafeEqualString(expected, signatureHeader);
+
+  if (!verified) {
+    throw new ApiError(401, "Invalid GitHub webhook signature");
+  }
+
+  return { configured: true, verified: true, required: true };
 };
 
 export const getGithubConnectUrl = (user) => {
@@ -590,11 +599,7 @@ export const getRepositoryIssueInsights = async (user, projectId) => {
 };
 
 export const handleGithubWebhook = async ({ event, deliveryId, signature, rawBody, payload }) => {
-  const signatureResult = verifyGithubWebhookSignature(rawBody, signature);
-
-  if (signatureResult.configured && !signatureResult.verified) {
-    throw new ApiError(401, "Invalid GitHub webhook signature");
-  }
+  const signatureResult = verifyGithubWebhookSignature({ rawBody, signatureHeader: signature });
 
   logger.info(
     {
@@ -603,6 +608,7 @@ export const handleGithubWebhook = async ({ event, deliveryId, signature, rawBod
       deliveryId,
       repository: payload.repository?.full_name,
       signatureVerified: signatureResult.verified,
+      signatureRequired: signatureResult.required,
     },
     "GitHub webhook received",
   );
