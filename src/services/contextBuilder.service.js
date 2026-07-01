@@ -55,6 +55,9 @@ const projectSelect = {
   status: true,
   progress: true,
   deadline: true,
+  githubRepositoryOwner: true,
+  githubRepositoryName: true,
+  githubDefaultBranch: true,
   createdAt: true,
   updatedAt: true,
   assignedTeam: {
@@ -190,6 +193,38 @@ const compactTask = (task) => ({
   updatedAt: task.updatedAt,
 });
 
+const daysBetween = (from, to = new Date()) => Math.max(0, Math.ceil((new Date(to) - new Date(from)) / 86400000));
+
+const getGithubActivitySummary = (activityLogs) => {
+  const githubLogs = activityLogs.filter((activity) => String(activity.action).startsWith("GITHUB_"));
+
+  return {
+    recentEvents: githubLogs.length,
+    lastEventAt: githubLogs[0]?.createdAt || null,
+    actions: countBy(githubLogs, "action"),
+  };
+};
+
+const getProductivitySummary = (tasks) => {
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const recentlyCompleted = tasks.filter((task) => task.status === "COMPLETED" && new Date(task.updatedAt) >= sevenDaysAgo);
+  const recentlyUpdated = tasks.filter((task) => new Date(task.updatedAt) >= sevenDaysAgo);
+
+  return {
+    recentlyCompletedTasks: recentlyCompleted.length,
+    recentlyUpdatedTasks: recentlyUpdated.length,
+    recentCompletionRate: calculateRate(recentlyCompleted.length, recentlyUpdated.length || tasks.length),
+  };
+};
+
+const buildDeliveryTrend = (project, metrics) => {
+  if (!project.deadline) return "NO_DEADLINE";
+  if (metrics.isDelayed) return "DELAYED";
+  if (daysBetween(project.createdAt, project.deadline) <= 14 && metrics.taskSummary.completionRate < 70) return "AT_RISK";
+  return metrics.taskSummary.completionRate >= 80 ? "ON_TRACK" : "WATCH";
+};
+
 const getRecentActivity = async ({ organizationId, entityIds }) => {
   return prisma.activityLog.findMany({
     where: {
@@ -249,6 +284,14 @@ const buildProjectBaseContext = async (user, projectId) => {
       description: project.description,
       status: project.status,
       deadline: project.deadline,
+      githubRepository:
+        project.githubRepositoryOwner && project.githubRepositoryName
+          ? {
+              owner: project.githubRepositoryOwner,
+              name: project.githubRepositoryName,
+              defaultBranch: project.githubDefaultBranch,
+            }
+          : null,
       assignedTeam: project.assignedTeam
         ? {
             id: project.assignedTeam.id,
@@ -435,6 +478,135 @@ export const buildTaskSuggestionContext = async (user, projectId) => {
     openTasks: openTasks.slice(0, taskContextLimit).map(compactTask),
     memberWorkload,
   };
+  });
+};
+
+export const buildProjectHealthContext = async (user, projectId) => {
+  return cacheAiContext(user, "project-health", projectId, async () => {
+    const context = await buildProjectBaseContext(user, projectId);
+
+    return {
+      project: context.project,
+      metrics: context.metrics,
+      overdueTasks: context.tasks.filter((task) => task.deadline && new Date(task.deadline) < new Date()),
+      blockedTasks: context.tasks.filter((task) => task.status === "BLOCKED"),
+      milestoneProgress: {
+        projectProgress: context.metrics.progress,
+        taskCompletionRate: context.metrics.taskSummary.completionRate,
+      },
+      githubActivity: getGithubActivitySummary(context.activityLogs),
+      recentProductivity: getProductivitySummary(context.rawTasks),
+      deliveryTrend: buildDeliveryTrend(
+        {
+          createdAt: context.project.createdAt,
+          deadline: context.project.deadline,
+        },
+        context.metrics,
+      ),
+      activityLogs: context.activityLogs,
+    };
+  });
+};
+
+export const buildSmartTaskAssignmentContext = async (user, projectId) => {
+  return cacheAiContext(user, "smart-task-assignment", projectId, async () => {
+    const context = await buildTaskSuggestionContext(user, projectId);
+
+    return {
+      ...context,
+      assignmentSignals: {
+        skillsAvailable: false,
+        roleWeighting: "Prefer active team members with lower active task count and stronger completion rate.",
+      },
+    };
+  });
+};
+
+export const buildSprintPlanContext = async (user, projectId) => {
+  return cacheAiContext(user, "sprint-plan", projectId, async () => {
+    const context = await buildProjectBaseContext(user, projectId);
+    const priorityOrder = { URGENT: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
+    const candidateTasks = context.rawTasks
+      .filter((task) => openTaskStatuses.includes(task.status))
+      .sort(
+        (a, b) =>
+          priorityOrder[a.priority] - priorityOrder[b.priority] ||
+          new Date(a.deadline || 8640000000000000) - new Date(b.deadline || 8640000000000000),
+      );
+
+    return {
+      project: context.project,
+      metrics: context.metrics,
+      candidateTasks: candidateTasks.slice(0, taskContextLimit).map(compactTask),
+      teamMembers: context.teamMembers,
+      recentProductivity: getProductivitySummary(context.rawTasks),
+    };
+  });
+};
+
+export const buildDailyStandupContext = async (user, teamId) => {
+  return cacheAiContext(user, "daily-standup", teamId, async () => {
+    const context = await buildTeamAnalysisContext(user, teamId);
+    const activityLogs = await getRecentActivity({
+      organizationId: user.organizationId,
+      entityIds: context.projectMetrics.map((project) => project.projectId),
+    });
+
+    return {
+      team: context.team,
+      metrics: context.metrics,
+      memberPerformance: context.memberPerformance,
+      projectMetrics: context.projectMetrics,
+      activityLogs,
+    };
+  });
+};
+
+export const buildWeeklyReportContext = async (user, projectId) => {
+  return cacheAiContext(user, "weekly-report", projectId, async () => {
+    const context = await buildProjectBaseContext(user, projectId);
+
+    return {
+      project: context.project,
+      metrics: context.metrics,
+      tasks: context.tasks,
+      recentProductivity: getProductivitySummary(context.rawTasks),
+      githubActivity: getGithubActivitySummary(context.activityLogs),
+      activityLogs: context.activityLogs,
+    };
+  });
+};
+
+export const buildTeamCoachingContext = async (user, teamId) => {
+  return cacheAiContext(user, "team-coaching", teamId, () => buildTeamAnalysisContext(user, teamId));
+};
+
+export const buildRiskPredictionContext = async (user, projectId) => {
+  return cacheAiContext(user, "risk-prediction", projectId, async () => {
+    const context = await buildProjectBaseContext(user, projectId);
+
+    return {
+      project: context.project,
+      metrics: context.metrics,
+      deadlineSignals: {
+        deadline: context.project.deadline,
+        isDelayed: context.metrics.isDelayed,
+        deliveryTrend: buildDeliveryTrend(
+          {
+            createdAt: context.project.createdAt,
+            deadline: context.project.deadline,
+          },
+          context.metrics,
+        ),
+      },
+      workloadSignals: context.teamMembers.map((member) => ({
+        memberId: member.id,
+        name: member.name,
+        activeTasks: context.rawTasks.filter((task) => task.assignedToId === member.id && openTaskStatuses.includes(task.status)).length,
+      })),
+      riskSignals: context.metrics.riskSignals,
+      githubActivity: getGithubActivitySummary(context.activityLogs),
+    };
   });
 };
 

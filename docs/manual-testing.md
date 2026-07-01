@@ -127,6 +127,26 @@ Use this checklist while automated tests are intentionally removed during rapid 
 - Run team analysis with `POST /api/ai/team-analysis/:teamId`.
 - Run task suggestions with `POST /api/ai/task-suggestions/:projectId`.
 - Run executive summary with `POST /api/ai/executive-summary`.
+- Run project health advisor with `POST /api/ai/project-health/:projectId`.
+- Confirm project health returns overall health, health score, major problems, recommendations, and predicted delivery risk.
+- Run smart task assignment with `POST /api/ai/task-assignment/:projectId`.
+- Confirm task assignment returns best developer, confidence score, reason, estimated completion, and workload comparison.
+- Run sprint planning with `POST /api/ai/sprint-plan/:projectId`.
+- Confirm sprint planning returns recommended backlog, task priority, ordering, sprint load, and bottlenecks.
+- Run daily standup generation with `POST /api/ai/daily-standup/:teamId`.
+- Confirm standup output contains yesterday, today, blockers, highlights, and risk summary.
+- Run weekly report with `POST /api/ai/weekly-report/:projectId`.
+- Confirm weekly report includes executive summary, achievements, blockers, delivery progress, and recommendations.
+- Run team coaching with `POST /api/ai/team-coaching/:teamId`.
+- Confirm team coaching returns strengths, weaknesses, and recommendations.
+- Run risk prediction with `POST /api/ai/risk-prediction/:projectId`.
+- Confirm risk prediction returns risk probability, impact, and mitigation recommendations.
+- Confirm AI workflows create an `AIInsight` row and `AI_REPORT_GENERATED` or `AI_RISK_GENERATED` activity entry.
+- Re-run an unchanged AI workflow and confirm the response includes `cached: true`.
+- Accept and reject a recommendation with `POST /api/ai/insights/:insightId/accept` and `POST /api/ai/insights/:insightId/reject`.
+- Confirm accept/reject actions update insight status and create activity entries.
+- Confirm AI report, project health risk, and high-risk prediction notifications are created when applicable.
+- Confirm AI usage metrics are written with feature, estimated tokens, latency, success, and errors.
 - Confirm unauthorized roles cannot call restricted AI endpoints.
 
 ## GitHub Integration

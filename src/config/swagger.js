@@ -647,6 +647,87 @@ const swaggerDefinition = {
         dataSchema: { $ref: "#/components/schemas/AIResponse" },
       }),
     },
+    "/api/ai/project-health/{projectId}": {
+      post: protectedOperation({
+        tags: ["AI"],
+        summary: "Generate AI project health advice",
+        description: "Requires ADMIN or TEAM_LEAD role. Persists an AI insight and returns cached insight data when context is unchanged.",
+        parameters: [uuidParam("projectId", "Project ID")],
+        dataSchema: { $ref: "#/components/schemas/AIProjectHealth" },
+      }),
+    },
+    "/api/ai/task-assignment/{projectId}": {
+      post: protectedOperation({
+        tags: ["AI"],
+        summary: "Generate smart task assignment recommendation",
+        description: "Requires TEAM_LEAD role. Uses workload, performance, role, and active task count.",
+        parameters: [uuidParam("projectId", "Project ID")],
+        dataSchema: { $ref: "#/components/schemas/AITaskAssignment" },
+      }),
+    },
+    "/api/ai/sprint-plan/{projectId}": {
+      post: protectedOperation({
+        tags: ["AI"],
+        summary: "Generate sprint plan",
+        description: "Requires ADMIN or TEAM_LEAD role.",
+        parameters: [uuidParam("projectId", "Project ID")],
+        dataSchema: { $ref: "#/components/schemas/AISprintPlan" },
+      }),
+    },
+    "/api/ai/daily-standup/{teamId}": {
+      post: protectedOperation({
+        tags: ["AI"],
+        summary: "Generate daily standup",
+        description: "Requires ADMIN or TEAM_LEAD role.",
+        parameters: [uuidParam("teamId", "Team ID")],
+        dataSchema: { $ref: "#/components/schemas/AIDailyStandup" },
+      }),
+    },
+    "/api/ai/weekly-report/{projectId}": {
+      post: protectedOperation({
+        tags: ["AI"],
+        summary: "Generate weekly project report",
+        description: "Requires ADMIN or TEAM_LEAD role.",
+        parameters: [uuidParam("projectId", "Project ID")],
+        dataSchema: { $ref: "#/components/schemas/AIWeeklyReport" },
+      }),
+    },
+    "/api/ai/team-coaching/{teamId}": {
+      post: protectedOperation({
+        tags: ["AI"],
+        summary: "Generate team performance coaching",
+        description: "Requires ADMIN or TEAM_LEAD role.",
+        parameters: [uuidParam("teamId", "Team ID")],
+        dataSchema: { $ref: "#/components/schemas/AITeamCoaching" },
+      }),
+    },
+    "/api/ai/risk-prediction/{projectId}": {
+      post: protectedOperation({
+        tags: ["AI"],
+        summary: "Generate predictive delivery risk analysis",
+        description: "Requires ADMIN or TEAM_LEAD role. High-risk results trigger notifications.",
+        parameters: [uuidParam("projectId", "Project ID")],
+        dataSchema: { $ref: "#/components/schemas/AIRiskPrediction" },
+      }),
+    },
+    "/api/ai/insights/{insightId}/accept": {
+      post: protectedOperation({
+        tags: ["AI"],
+        summary: "Accept an AI recommendation",
+        description: "Requires ADMIN or TEAM_LEAD role and records an activity log entry.",
+        parameters: [uuidParam("insightId", "AI insight ID")],
+        dataSchema: { $ref: "#/components/schemas/AIInsight" },
+      }),
+    },
+    "/api/ai/insights/{insightId}/reject": {
+      post: protectedOperation({
+        tags: ["AI"],
+        summary: "Reject an AI recommendation",
+        description: "Requires ADMIN or TEAM_LEAD role and records an activity log entry.",
+        parameters: [uuidParam("insightId", "AI insight ID")],
+        dataSchema: { $ref: "#/components/schemas/AIInsight" },
+      }),
+    },
     "/api/ai/executive-summary": {
       post: protectedOperation({
         tags: ["AI"],
@@ -1279,6 +1360,90 @@ const swaggerDefinition = {
         type: "object",
         description: "AI response shape varies by workflow but is validated by the backend before return.",
         additionalProperties: true,
+      },
+      AIInsight: {
+        type: "object",
+        properties: {
+          id: { type: "string", format: "uuid" },
+          type: { type: "string", example: "projectHealth" },
+          summary: { type: "string" },
+          recommendations: { type: "array", items: { type: "string" } },
+          status: { type: "string", enum: ["GENERATED", "ACCEPTED", "REJECTED"] },
+          createdAt: { type: "string", format: "date-time" },
+        },
+      },
+      AIProjectHealth: {
+        type: "object",
+        properties: {
+          insightId: { type: "string", format: "uuid" },
+          cached: { type: "boolean", example: false },
+          promptVersion: { type: "string", example: "1.0.0" },
+          overallHealth: { type: "string" },
+          healthScore: { type: "integer", minimum: 0, maximum: 100 },
+          majorProblems: { type: "array", items: { type: "string" } },
+          recommendations: { type: "array", items: { type: "string" } },
+          predictedDeliveryRisk: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+        },
+      },
+      AITaskAssignment: {
+        type: "object",
+        properties: {
+          insightId: { type: "string", format: "uuid" },
+          bestDeveloper: { type: "string" },
+          confidenceScore: { type: "integer", minimum: 0, maximum: 100 },
+          reason: { type: "string" },
+          estimatedCompletion: { type: "string" },
+          workloadComparison: { type: "array", items: { type: "object" } },
+        },
+      },
+      AISprintPlan: {
+        type: "object",
+        properties: {
+          insightId: { type: "string", format: "uuid" },
+          recommendedSprintBacklog: { type: "array", items: { type: "object" } },
+          estimatedSprintLoad: { type: "string" },
+          predictedBottlenecks: { type: "array", items: { type: "string" } },
+        },
+      },
+      AIDailyStandup: {
+        type: "object",
+        properties: {
+          insightId: { type: "string", format: "uuid" },
+          yesterday: { type: "array", items: { type: "string" } },
+          today: { type: "array", items: { type: "string" } },
+          blockers: { type: "array", items: { type: "string" } },
+          importantHighlights: { type: "array", items: { type: "string" } },
+          riskSummary: { type: "string" },
+        },
+      },
+      AIWeeklyReport: {
+        type: "object",
+        properties: {
+          insightId: { type: "string", format: "uuid" },
+          executiveSummary: { type: "string" },
+          teamAchievements: { type: "array", items: { type: "string" } },
+          majorBlockers: { type: "array", items: { type: "string" } },
+          deliveryProgress: { type: "string" },
+          aiRecommendations: { type: "array", items: { type: "string" } },
+        },
+      },
+      AITeamCoaching: {
+        type: "object",
+        properties: {
+          insightId: { type: "string", format: "uuid" },
+          strengths: { type: "array", items: { type: "string" } },
+          weaknesses: { type: "array", items: { type: "string" } },
+          recommendations: { type: "array", items: { type: "string" } },
+        },
+      },
+      AIRiskPrediction: {
+        type: "object",
+        properties: {
+          insightId: { type: "string", format: "uuid" },
+          risks: { type: "array", items: { type: "object" } },
+          overallRiskProbability: { type: "integer", minimum: 0, maximum: 100 },
+          summary: { type: "string" },
+        },
       },
       DashboardSummary: {
         type: "object",
