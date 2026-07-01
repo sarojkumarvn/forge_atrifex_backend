@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { projectIdParamSchema, trimmedString, uuidSchema } from "./common.validator.js";
+import { paginationQuerySchema, projectIdParamSchema, trimmedString, uuidSchema } from "./common.validator.js";
 
 const githubOwnerSchema = trimmedString("repositoryOwner", { min: 1, max: 39 }).regex(
   /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/,
@@ -28,4 +28,26 @@ export const connectRepositorySchema = {
 
 export const githubProjectSchema = {
   params: projectIdParamSchema,
+};
+
+export const githubRepositoryRemovalSchema = {
+  params: projectIdParamSchema,
+};
+
+export const githubRepositorySyncSchema = {
+  params: projectIdParamSchema,
+};
+
+export const githubCommitTimelineSchema = {
+  params: projectIdParamSchema,
+  query: paginationQuerySchema,
+};
+
+export const githubWebhookSchema = {
+  headers: z.object({
+    "x-github-event": z.enum(["push", "pull_request", "issues", "repository", "ping"]).or(z.string().trim().min(1)),
+    "x-github-delivery": z.string().trim().min(1, "x-github-delivery is required").optional(),
+    "x-hub-signature-256": z.string().trim().min(1).optional(),
+  }).passthrough(),
+  body: z.object({}).passthrough(),
 };

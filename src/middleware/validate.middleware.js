@@ -30,7 +30,8 @@ const validate = (schema) => (req, res, next) => {
     const body = parseSegment(schema.body, req.body, "body");
     const params = parseSegment(schema.params, req.params, "params");
     const query = parseSegment(schema.query, req.query, "query");
-    const errors = [...body.errors, ...params.errors, ...query.errors];
+    const headers = parseSegment(schema.headers, req.headers, "headers");
+    const errors = [...body.errors, ...params.errors, ...query.errors, ...headers.errors];
 
     if (errors.length > 0) {
       throw new ValidationError("Validation failed", errors);
@@ -39,6 +40,7 @@ const validate = (schema) => (req, res, next) => {
     // Parsed values are assigned back only for declared schemas so Express getter-backed fields are not overwritten.
     if (schema.body) req.body = body.value;
     if (schema.params) req.params = params.value;
+    if (schema.headers) req.headers = headers.value;
     if (schema.query) {
       Object.defineProperty(req, "query", {
         value: query.value,
