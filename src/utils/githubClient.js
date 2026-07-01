@@ -1,8 +1,8 @@
-import crypto from "crypto";
 import ApiError from "./apiError.js";
 import logger from "../config/logger.js";
 import metrics from "./metrics.js";
 import { getRequestLoggerMeta } from "./requestContext.js";
+import { decryptSecret, encryptSecret } from "./secretCrypto.js";
 
 const defaultGithubApiUrl = "https://api.github.com";
 const githubOAuthAuthorizeUrl = "https://github.com/login/oauth/authorize";
@@ -21,16 +21,11 @@ const getTokenKey = () => {
     throw new ApiError(500, "GitHub token encryption key is not configured");
   }
 
-  return crypto.createHash("sha256").update(process.env.GITHUB_TOKEN_ENCRYPTION_KEY).digest();
+  return process.env.GITHUB_TOKEN_ENCRYPTION_KEY;
 };
 
 export const encryptGithubToken = (token) => {
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv("aes-256-gcm", getTokenKey(), iv);
-  const encrypted = Buffer.concat([cipher.update(token, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-
-  return `${iv.toString("base64")}:${tag.toString("base64")}:${encrypted.toString("base64")}`;
+  return encryptSecret({ value: token, key: getTokenKey() });
 };
 
 export const decryptGithubToken = (encryptedToken) => {
@@ -38,19 +33,7 @@ export const decryptGithubToken = (encryptedToken) => {
     throw new ApiError(401, "GitHub account is not connected");
   }
 
-  const [ivValue, tagValue, encryptedValue] = encryptedToken.split(":");
-
-  if (!ivValue || !tagValue || !encryptedValue) {
-    throw new ApiError(500, "Stored GitHub token is invalid");
-  }
-
-  const decipher = crypto.createDecipheriv("aes-256-gcm", getTokenKey(), Buffer.from(ivValue, "base64"));
-  decipher.setAuthTag(Buffer.from(tagValue, "base64"));
-
-  return Buffer.concat([
-    decipher.update(Buffer.from(encryptedValue, "base64")),
-    decipher.final(),
-  ]).toString("utf8");
+  return decryptSecret({ encryptedValue: encryptedToken, key: getTokenKey() });
 };
 
 export const buildGithubOAuthUrl = (state) => {

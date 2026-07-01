@@ -127,7 +127,10 @@ export const changeCurrentAccountPassword = async (user, payload) => {
   await prisma.$transaction(async (tx) => {
     await tx.user.update({
       where: { id: user.id },
-      data: { passwordHash },
+      data: {
+        passwordHash,
+        tokenVersion: { increment: 1 },
+      },
       select: { id: true },
     });
 

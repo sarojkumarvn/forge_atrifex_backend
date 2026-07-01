@@ -102,6 +102,7 @@ model User {
   location       String?
   isActive       Boolean  @default(true)
   status         UserStatus @default(ACTIVE)
+  tokenVersion   Int      @default(1)
   organizationId String   @db.Uuid
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt

@@ -10,6 +10,7 @@ export const safeUserSelect = {
   phone: true,
   isActive: true,
   status: true,
+  tokenVersion: true,
   createdAt: true,
   updatedAt: true,
   organization: {

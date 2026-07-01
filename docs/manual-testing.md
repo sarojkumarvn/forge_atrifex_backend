@@ -10,6 +10,36 @@ Use this checklist while automated tests are intentionally removed during rapid 
 - Start the backend with `npm run dev`.
 - Keep Swagger open at `http://localhost:5000/api/docs`.
 
+## Production Startup Verification
+
+- Set `NODE_ENV=production` in a safe staging environment.
+- Temporarily remove one required variable and confirm startup fails with the variable name.
+- Restore all required variables and confirm startup succeeds.
+- Confirm `GITHUB_WEBHOOK_SECRET` is mandatory when `NODE_ENV=production`.
+- Confirm logs do not print secret values during startup failure or successful boot.
+
+## Migration Verification
+
+- Run `npm run prisma:validate` and confirm the schema is valid.
+- Run `npm run prisma:generate` and confirm Prisma Client generation succeeds.
+- Run `npm run prisma:migrate:deploy` against a disposable staging database.
+- Confirm the `tokenVersion` column exists on `User` after migrations.
+
+## Environment Validation
+
+- In development, confirm the server allows optional AI and GitHub production-only variables to be absent when those integrations are not being tested.
+- In production, confirm `DATABASE_URL`, `JWT_SECRET`, `CLIENT_URL`, `AI_PROVIDER`, `GROQ_API_KEY`, `AI_MODEL`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_CALLBACK_URL`, `GITHUB_TOKEN_ENCRYPTION_KEY`, and `GITHUB_WEBHOOK_SECRET` are required.
+- Confirm invalid or missing production configuration fails before the API starts accepting requests.
+
+## JWT Validation
+
+- Login and call `GET /api/auth/me` with the returned token.
+- Change the account password with `PATCH /api/account/password`.
+- Confirm the previous token is rejected after password change.
+- Login again and confirm the new token works.
+- Set `JWT_INVALID_BEFORE` to a timestamp after an existing token's issued-at time and confirm that token is rejected.
+- Remove `JWT_INVALID_BEFORE` and confirm newly issued tokens continue to work.
+
 ## Health And Documentation
 
 - Open `GET /` and confirm the backend running response.
@@ -172,6 +202,9 @@ Use this checklist while automated tests are intentionally removed during rapid 
 - Send a GitHub webhook sample to `POST /api/github/webhook` with `X-GitHub-Event`, `X-GitHub-Delivery`, and optional `X-Hub-Signature-256`.
 - Confirm webhook requests log receipt, create `GITHUB_WEBHOOK_RECEIVED` activity when the repository is linked, and notify organization admins.
 - Confirm supported webhook skeletons accept `push`, `pull_request`, `issues`, `repository`, and `ping`.
+- In production mode, send an unsigned webhook request and confirm it returns `401`.
+- Send a webhook request with an invalid `X-Hub-Signature-256` and confirm it returns `401`.
+- Send a webhook request with a valid HMAC SHA-256 signature and confirm it is accepted.
 - Confirm unconnected users receive a safe error when repository data is requested.
 
 ## Swagger
