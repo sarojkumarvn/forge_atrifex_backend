@@ -26,6 +26,49 @@ const fallbackByType = {
     majorRisks: [],
     recommendedActions: [],
   },
+  projectHealth: {
+    overallHealth: "UNKNOWN",
+    healthScore: 0,
+    majorProblems: [],
+    recommendations: [],
+    predictedDeliveryRisk: "LOW",
+  },
+  taskAssignment: {
+    bestDeveloper: "",
+    confidenceScore: 0,
+    reason: "AI task assignment could not be generated from the current response.",
+    estimatedCompletion: "",
+    workloadComparison: [],
+  },
+  sprintPlan: {
+    recommendedSprintBacklog: [],
+    estimatedSprintLoad: "",
+    predictedBottlenecks: [],
+  },
+  dailyStandup: {
+    yesterday: [],
+    today: [],
+    blockers: [],
+    importantHighlights: [],
+    riskSummary: "AI daily standup could not be generated from the current response.",
+  },
+  weeklyReport: {
+    executiveSummary: "AI weekly report could not be generated from the current response.",
+    teamAchievements: [],
+    majorBlockers: [],
+    deliveryProgress: "",
+    aiRecommendations: [],
+  },
+  teamCoaching: {
+    strengths: [],
+    weaknesses: [],
+    recommendations: [],
+  },
+  riskPrediction: {
+    risks: [],
+    overallRiskProbability: 0,
+    summary: "AI risk prediction could not be generated from the current response.",
+  },
 };
 
 const schemaByType = {
@@ -55,6 +98,49 @@ const schemaByType = {
     keyAchievements: "array",
     majorRisks: "array",
     recommendedActions: "array",
+  },
+  projectHealth: {
+    overallHealth: "string",
+    healthScore: "number",
+    majorProblems: "array",
+    recommendations: "array",
+    predictedDeliveryRisk: "string",
+  },
+  taskAssignment: {
+    bestDeveloper: "string",
+    confidenceScore: "number",
+    reason: "string",
+    estimatedCompletion: "string",
+    workloadComparison: "array",
+  },
+  sprintPlan: {
+    recommendedSprintBacklog: "array",
+    estimatedSprintLoad: "string",
+    predictedBottlenecks: "array",
+  },
+  dailyStandup: {
+    yesterday: "array",
+    today: "array",
+    blockers: "array",
+    importantHighlights: "array",
+    riskSummary: "string",
+  },
+  weeklyReport: {
+    executiveSummary: "string",
+    teamAchievements: "array",
+    majorBlockers: "array",
+    deliveryProgress: "string",
+    aiRecommendations: "array",
+  },
+  teamCoaching: {
+    strengths: "array",
+    weaknesses: "array",
+    recommendations: "array",
+  },
+  riskPrediction: {
+    risks: "array",
+    overallRiskProbability: "number",
+    summary: "string",
   },
 };
 
@@ -134,8 +220,33 @@ export const validateAiResponse = (type, content) => {
     validated.riskLevel = fallback.riskLevel;
   }
 
+  if (type === "projectHealth" && !["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(validated.predictedDeliveryRisk)) {
+    validated.predictedDeliveryRisk = fallback.predictedDeliveryRisk;
+  }
+
+  if (type === "riskPrediction") {
+    validated.risks = validated.risks
+      .filter((risk) => risk && typeof risk === "object")
+      .map((risk) => ({
+        type: typeof risk.type === "string" ? risk.type : "LATE_DELIVERY",
+        riskProbability: typeof risk.riskProbability === "number" ? Math.max(0, Math.min(100, risk.riskProbability)) : 0,
+        impact: ["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(risk.impact) ? risk.impact : "LOW",
+        recommendedMitigation:
+          typeof risk.recommendedMitigation === "string" ? risk.recommendedMitigation : "",
+      }));
+    validated.overallRiskProbability = Math.max(0, Math.min(100, validated.overallRiskProbability));
+  }
+
   if (type === "taskSuggestions") {
     validated.suggestions = sanitizeTaskSuggestions(validated.suggestions);
+  }
+
+  if (typeof validated.healthScore === "number") {
+    validated.healthScore = Math.max(0, Math.min(100, validated.healthScore));
+  }
+
+  if (typeof validated.confidenceScore === "number") {
+    validated.confidenceScore = Math.max(0, Math.min(100, validated.confidenceScore));
   }
 
   return validated;

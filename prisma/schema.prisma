@@ -79,6 +79,8 @@ model Organization {
   teams        Team[]
   projects     Project[]
   activityLogs ActivityLog[]
+  aiInsights   AIInsight[]
+  aiUsageMetrics AIUsageMetric[]
   owner        User?            @relation("OrganizationOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   invites      OrganizationInvite[]
 
@@ -113,6 +115,8 @@ model User {
   delegatedTasks  Task[]           @relation("TaskAssignedBy")
   notifications   Notification[]
   activityLogs    ActivityLog[]    @relation("ActivityActor")
+  generatedAIInsights AIInsight[]  @relation("AIInsightGeneratedBy")
+  aiUsageMetrics  AIUsageMetric[]
   sentOrganizationInvites OrganizationInvite[]
 
   @@index([organizationId])
@@ -165,6 +169,7 @@ model Team {
   organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   memberships      TeamMembership[]
   assignedProjects Project[]
+  aiInsights       AIInsight[]
 
   @@unique([organizationId, name])
   @@index([leadId])
@@ -210,6 +215,7 @@ model Project {
   assignedTeam Team?        @relation(fields: [assignedTeamId], references: [id], onDelete: SetNull)
   createdBy    User         @relation("ProjectCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   tasks        Task[]
+  aiInsights   AIInsight[]
 
   @@index([organizationId])
   @@index([assignedTeamId])
@@ -281,5 +287,57 @@ model ActivityLog {
   @@index([organizationId])
   @@index([action])
   @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+model AIInsight {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  projectId       String?  @db.Uuid
+  teamId          String?  @db.Uuid
+  type            String
+  contextHash     String
+  summary         String
+  recommendations Json?
+  result          Json
+  generatedBy     String?  @db.Uuid
+  status          String   @default("GENERATED")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project      Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  team         Team?        @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  generator    User?        @relation("AIInsightGeneratedBy", fields: [generatedBy], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([projectId])
+  @@index([teamId])
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+  @@unique([organizationId, type, contextHash])
+}
+
+model AIUsageMetric {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  userId          String?  @db.Uuid
+  feature         String
+  provider        String
+  model           String
+  estimatedTokens Int      @default(0)
+  latencyMs       Int      @default(0)
+  success         Boolean  @default(false)
+  errorMessage    String?
+  createdAt       DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([feature])
+  @@index([success])
   @@index([createdAt])
 }
